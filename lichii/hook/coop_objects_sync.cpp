@@ -520,7 +520,10 @@ LifeRouted RouteLife(const LifeAsk& a) {
     const bool steppable = a.step_seen && a.has_component && a.old >= 0 && (a.hurt > 0 || a.life < a.old);
     if (steppable) {
         if (a.native && a.hurt <= 0 && !a.replay_seen) {
-            return {LifeRoute::wait_replay, 0};
+            // enemy-late-kill: our replay is not taken yet (a damage step may refuse it and never move its hit
+            // id: a Deku Baba's copy did, to the owner's death). The fall goes to the Life step now, tied to the
+            // replay: dropped there if the replay lands first, the replay withdrawn if the fall is taken.
+            return {LifeRoute::step, a.old - a.life, true};
         }
         if (a.native) {
             // A stale give is merged: a fall to a life already holds it, a hurt adds it.
@@ -531,6 +534,24 @@ LifeRouted RouteLife(const LifeAsk& a) {
         }
     }
     return {a.native ? LifeRoute::lost : LifeRoute::write, 0};
+}
+
+GivenFate StaleGivenFate(const GivenAsk& a) {
+    if (!a.due) {
+        return GivenFate::wait;
+    }
+    // A kept give can outlive its actor (A's remove while B's copy sleeps): its address is then freed, and a write
+    // there would land in another actor's memory (reviewer-12). Off the walk it is gone, before any write.
+    if (!a.on_walk || !a.same_component) {
+        return GivenFate::gone;
+    }
+    if (a.pending == 0) {
+        return GivenFate::taken;
+    }
+    // An enemy's life is never written, and taking the change back lost it for good: the copy kept its full life
+    // while its owner's had fallen (lane NEXT5b). Its own Life step takes it when the enemy wakes, with the same
+    // tie to the replay (dropped if the replay lands first, the replay withdrawn if the fall is taken).
+    return a.native ? GivenFate::keep : GivenFate::write;
 }
 
 bool PlaysByFrame(std::string_view name) {
@@ -1665,6 +1686,18 @@ void Sync::Stepped(std::uint64_t address, std::int32_t amount, std::uint64_t now
         it->second.step_given += amount;
         it->second.step_given_until = now_us + kStepGivenUs;
     }
+}
+
+void Sync::KeepGiven(std::uint64_t address, std::int32_t amount, std::uint64_t now_us) {
+    const auto it = objects_.find(address);
+    if (it == objects_.end() || amount <= 0) {
+        return;
+    }
+    Object& o = it->second;
+    o.late_left = std::max(o.late_left, amount);  // (the same fall the hurt's end booked: never added twice)
+    o.late_until = std::max(o.late_until, now_us + kHurtLateUs);
+    o.step_given = std::max(o.step_given, amount);
+    o.step_given_until = std::max(o.step_given_until, now_us + kStepGivenUs);
 }
 
 std::int32_t Sync::StepHits(Object& o, std::int32_t fell, std::int32_t life, std::uint64_t now_us) {

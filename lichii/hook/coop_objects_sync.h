@@ -667,7 +667,6 @@ bool NativeOnlyName(std::string_view name);
 // How WriteLife hands one life change to the game (pure; WriteLife reads the game for it, then acts).
 enum class LifeRoute {
     replay,       // a whole hit for the game's own damage step (Mover::Replay)
-    wait_replay,  // our replayed hit still waits for its damage step: nothing more now
     step,         // `amount` into the game's Life step (patch 0007)
     lost,         // nothing: the actor keeps its game's life (native-only)
     write,        // the old direct write (not native-only: a pot, a crate, an animal)
@@ -691,8 +690,30 @@ struct LifeAsk {
 struct LifeRouted {
     LifeRoute route = LifeRoute::lost;
     std::int32_t amount = 0;  // for step
+    bool tied = false;        // step: the fall our replay was to deal, which its damage step has not taken yet:
+                              // given tied to the replay (LifeTable::Give's tied_to), dropped if the replay lands
 };
 LifeRouted RouteLife(const LifeAsk& a);
+
+// enemy-late-kill (lane NEXT5b): what becomes of a life change given to the game's Life step (patch 0007) that no
+// step took in its wait (CoopObjects' kGivenWaitUs). A Deku Baba runs neither its damage step nor its Life step
+// while it sleeps (no Link near in that game), so its copy took nothing while the other player's Link was away.
+enum class GivenFate {
+    wait,   // not due yet
+    gone,   // the actor is off the walk (removed, freed), or another one is there now: taken back, never written
+    taken,  // nothing waits any more: its step took it (or a newer give took it back)
+    keep,   // an enemy (its life is never written): left for its next Life step, however late (when it wakes)
+    write,  // anything else: taken back and its life written (as before)
+};
+struct GivenAsk {
+    bool due = false;             // its wait is over
+    bool on_walk = false;         // the actor it was given to is still on the walk (its address listed, its stamp
+                                  // the same): off it, the actor was removed and its memory may be another's now
+    bool same_component = false;  // the actor there still has the Life component it was given to
+    std::int32_t pending = 0;     // LifeTable::Pending for it
+    bool native = false;          // NativeOnlyName
+};
+GivenFate StaleGivenFate(const GivenAsk& a);
 
 // Issue 88: the hearts the game draws come from our Link's Life component,
 // not from the shared PlayerStatus.MaxLife flag. The max (quarter hearts) to
@@ -857,6 +878,10 @@ public:
     // Life another game's change takes through the Life step itself (not
     // the game's damage, so no GameHit comes for it): its fall is no hit.
     void Stepped(std::uint64_t address, std::int32_t amount, std::uint64_t now_us);
+    // enemy-late-kill: a fall given to a copy's Life step and kept for its next step (GivenFate::keep: the enemy
+    // sleeps). Called while it waits: the late window and the step's given part stay open for `amount`, so the
+    // fall is no hit of ours when it lands, however late (else it went to the owner as a second hit).
+    void KeepGiven(std::uint64_t address, std::int32_t amount, std::uint64_t now_us);
     static constexpr std::uint64_t kStepWaitUs = 300'000;
     static constexpr std::uint64_t kStepGivenUs = 1'000'000;
     std::size_t LooseDrops() const { return loose_drops_; }
