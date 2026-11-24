@@ -3238,3 +3238,76 @@ TEST_CASE("pause tab: an A on Title Screen just after the cursor left Longshot S
     CHECK_FALSE(CoopPauseTab::CursorOnState(4));
     CHECK_FALSE(CoopPauseTab::CursorOnState(5));
 }
+
+TEST_CASE("pause tab: one cursor a page, the frame on the one row or line lit or on none (player report 276)") {
+    const std::uint32_t all = (1u << kRows) - 1;
+    // The rows have the pad: the frame on the row the cursor is on, the rows not dimmed, no line framed.
+    PageCursor c = CursorAt(2, all, false, 3);
+    CHECK(c.frame_row == 2);
+    CHECK(c.frame_line == -1);
+    CHECK_FALSE(c.list);
+    CHECK(MinusRowAlpha(c, 2) == 1.0f);
+    CHECK(MinusRowAlpha(c, 0) == 0.8f);
+    // A row with no words (not shown): no frame on it, so never an outline on a row that does not show.
+    CHECK(CursorAt(4, all & ~(1u << 4), false, -1).frame_row == -1);
+    CHECK(CursorAt(-1, all, false, -1).frame_row == -1);
+    CHECK(CursorAt(kRows, all, false, -1).frame_row == -1);
+    // The list has the pad: the frame on the line picked, none on the rows (the outline stayed on the row's button
+    // while a line of the list was the one lit), every row dimmed.
+    c = CursorAt(2, all, true, 3);
+    CHECK(c.frame_row == -1);
+    CHECK(c.frame_line == 3);
+    CHECK(c.list);
+    for (int r = 0; r < kRows; ++r) CHECK(MinusRowAlpha(c, r) == 0.45f);
+    // Nothing picked in the list (or past its panes): no frame anywhere rather than one on what is not lit.
+    CHECK(CursorAt(2, all, true, -1) == PageCursor{-1, -1, true});
+    CHECK(CursorAt(2, all, true, kCursorLines).frame_line == -1);
+    CHECK(CursorAt(2, all, true, kCursorLines - 1).frame_line == kCursorLines - 1);
+    // The same inputs, the same cursor: the frames and the alphas set from it agree at every update.
+    CHECK(CursorAt(1, all, false, -1) == CursorAt(1, all, false, 5));
+}
+
+TEST_CASE("pause tab: the - page's list's alphas come from the same pick as its frame (player report 276)") {
+    const std::uint32_t pickable = (1u << 1) | (1u << 2) | (1u << 3);   // three games; the heading (0) and a note (4) not
+    // The rows have the pad: the heading a little dim, a line of text dim, the lines that can be picked bright.
+    CHECK(MinusLineAlpha(0, pickable, -1, false) == 0.7f);
+    CHECK(MinusLineAlpha(4, pickable, -1, false) == 0.55f);
+    CHECK(MinusLineAlpha(2, pickable, -1, false) == 1.0f);
+    // The list has the pad on line 2: it bright, the other games dimmed; the framed line is that same one.
+    CHECK(MinusLineAlpha(2, pickable, 2, true) == 1.0f);
+    CHECK(MinusLineAlpha(1, pickable, 2, true) == 0.45f);
+    CHECK(MinusLineAlpha(3, pickable, 2, true) == 0.45f);
+    CHECK(CursorAt(0, 1u, true, 2).frame_line == 2);
+    // A field's keys (nothing in `pickable`): the key picked bright, as its frame.
+    CHECK(MinusLineAlpha(5, 0, 5, true) == 1.0f);
+    CHECK(MinusLineAlpha(6, 0, 5, true) == 0.55f);
+    // A heading that can be picked (co-op's menu's): as any line.
+    CHECK(MinusLineAlpha(0, 1u, 0, true) == 1.0f);
+    CHECK(MinusLineAlpha(0, 1u, 1, true) == 0.45f);
+}
+
+TEST_CASE("pause tab: the frames given back to the game after the list show only where its cursor is now (review-01112-h)") {
+    // The game's focused button's name: a row, a line of the list, or none.
+    CHECK(GameFrameOf("Pa_Button_03") == GameFrame{3, -1});
+    CHECK(GameFrameOf("Pa_List_02") == GameFrame{-1, 2});
+    CHECK(GameFrameOf("Pa_List_07") == GameFrame{-1, kCursorLines - 1});
+    CHECK(GameFrameOf("") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_05") == GameFrame{});   // (System's own buttons: not one of our rows)
+    CHECK(GameFrameOf("Pa_List_08") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_3") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_0x") == GameFrame{});
+    CHECK(GameFrameOf("W_Pa_Button_01") == GameFrame{});
+    // The rows' cursor on row 1 at the opening, moved to row 3, Right into the list, B: back to the game, the frame on
+    // row 3 alone (as the opening had them, row 1 kept its frame beside row 3's: two outlines).
+    const GameFrame now = GameFrameOf("Pa_Button_03");
+    int shown = 0;
+    for (int r = 0; r < kRows; ++r) shown += GivenBackShown(false, r, now.row) ? 1 : 0;
+    CHECK(shown == 1);
+    CHECK(GivenBackShown(false, 3, now.row));
+    CHECK_FALSE(GivenBackShown(false, 1, now.row));
+    // No button focused for a moment: no frame of ours left shown (the game's next Select shows its own).
+    for (int r = 0; r < kRows; ++r) CHECK_FALSE(GivenBackShown(false, r, -1));
+    // A layout that showed every frame at the opening (the Select animation, not the pane, is what the focus moves):
+    // all shown again, as it had them.
+    for (int r = 0; r < kRows; ++r) CHECK(GivenBackShown(true, r, now.row));
+}
