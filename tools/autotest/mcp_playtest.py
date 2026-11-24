@@ -353,7 +353,7 @@ MOVE_TOOLS = [
     {"name": "jump", "description": "Run straight at (`x`, `z`) at full stick so Link jumps off the edge by himself (a "
      "run off a ledge jumps; a walk only drops), with no side steps, until he is on the ground near the point. "
      "`land_y` is the far side's height. `result`: landed, fell (on the ground over 1 m below `land_y`), respawned "
-     "(put back: a pit or a void), stuck (no nearer for 4 looks: a wall, or no jump there), stopped (a move was "
+     "(put back: a pit or a void), stuck (no nearer for 4 looks on the ground: a wall, or no jump there; a fall past the point is not stuck), stopped (a move was "
      "refused: no camera; no frame ran), or a stop (an event, a "
      "scene change, timed out). `airborne` says whether the height moved on the way; `trace` is [frames, x, y, z]."
      + MOVE_NOTE,

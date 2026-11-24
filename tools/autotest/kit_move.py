@@ -680,7 +680,7 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
 
     `land_y`: the height of the far side. Results: `landed` (within `tolerance` of the point and on the ground, and
     not more than FALL_M below `land_y`), `fell` (on the ground more than FALL_M below `land_y`), `respawned` (Link was put back: a pit or a void; the life may be lower), `stuck` (no nearer for
-    `stuck_looks` looks: a wall, or the edge does not jump), `stopped` (the bridge refused the move: no camera, an
+    `stuck_looks` looks on the ground: a wall, or the edge does not jump; a fall that carries him past the point is not stuck), `stopped` (the bridge refused the move: no camera, an
     event; no frame ran), or a stop (scene changed, event, timed out). On the ground means two looks in a row with the
     height steady (ON_GROUND_M), so the top of the arc is not taken for a landing; within `tolerance` of the point and
     down (one steady look, or within AT_LAND_M of `land_y`) the stick lets go, so Link stops there and the landing is called two looks (2 x `chunk` frames) after he comes down. The trace
@@ -722,7 +722,7 @@ def jump(client, x, z, land_y=None, tolerance=0.6, max_frames=240, chunk=4, stuc
                         st)
         if dist < best - JUMP_STEP_M or dist <= tolerance:   # at the point: waiting to land is not stuck
             best, still = min(best, dist), 0
-        else:
+        elif ground >= 1:   # in the air nothing is stuck: a long fall may carry him past the point before he is down
             still += 1
         if still >= stuck_looks:
             return _out(out, "stuck", "no nearer than %.2f m for %d frames (a wall, or the edge is not a jump)" %

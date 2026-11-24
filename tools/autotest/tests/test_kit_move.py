@@ -677,6 +677,31 @@ class Jump(unittest.TestCase):
         self.assertEqual(r["result"], "landed", r)
         self.assertLessEqual(abs(r["pos"][2] - 6.5), 0.6, r)
 
+    def test_a_long_fall_past_the_point_is_not_stuck(self):
+        # The lane run: off a 5 m ledge Link flew over the point and fell on past it for more than 4 looks; the stuck
+        # count ran in the air and called it stuck before he was down. In the air nothing counts as stuck.
+        g = Sim(pos=(0.0, 5.0, 0.0), ground=lambda x, z: 5.0 if z < 1.0 else 0.0)
+        orig, fall = g._walk, {"yaw": None}
+
+        def walk(yaw, strength):
+            if fall["yaw"] is not None:   # falling: 0.15 m down and 0.1 m on along the take-off way each frame
+                y = max(0.0, g.pos[1] - 0.15)
+                g.pos = [g.pos[0] + math.sin(math.radians(fall["yaw"])) * 0.1, y,
+                         g.pos[2] + math.cos(math.radians(fall["yaw"])) * 0.1]
+                if y == 0.0:
+                    fall["yaw"] = None
+                return
+            y0 = g.pos[1]
+            orig(yaw, strength)
+            if y0 - g.pos[1] > 1.0:
+                g.pos[1], fall["yaw"] = y0, yaw
+        g._walk = walk
+        r = km.jump(g, 0.0, 1.3, land_y=0.0)
+        self.assertEqual(r["result"], "landed", r)
+        self.assertTrue(r["airborne"])
+        self.assertLessEqual(abs(r["pos"][2] - 1.3), 0.6, r)
+        self.assertGreater(max(z for _f, _x, _y, z in r["trace"]), 1.3 + 0.6 + 1.0, r)   # he did land well past it
+
     def test_stuck_at_a_wall(self):
         g = Sim()
         orig = g._walk
