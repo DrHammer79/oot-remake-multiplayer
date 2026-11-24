@@ -27,6 +27,9 @@ mkdir -p "$tmp/bin"
 printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$py" >"$tmp/bin/python3"
 chmod +x "$tmp/bin/python3"
 export PATH="$tmp/bin:$PATH" HOME=$tmp/home XDG_DATA_HOME=$tmp/xdg
+# Hermetic: no start in this test asks GitHub for main's problem-report address (docs/problem-send-address.txt); the
+# test kits have none of their own, so no start asks the question or writes problem-send.json.
+export OOT_COOP_PROBLEM_ADDRESS_LOOKUP=off
 mkdir -p "$HOME" "$XDG_DATA_HOME"   # start.sh skips the menu entry when the XDG folder has no parent
 unset DISPLAY WAYLAND_DISPLAY
 log=$tmp/calls.log
