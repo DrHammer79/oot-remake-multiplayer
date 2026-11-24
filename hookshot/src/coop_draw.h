@@ -240,8 +240,8 @@ PlayerListSize PlayerListAt(float width, float height, float top, std::size_t ro
 
 // The keys (docs/hookshot.md): F6 opens the game's - menu on the Players view (list_press, once as F6 goes down;
 // coop_players_open.h), or, without our - tabs, holding it shows the drawn list (list); F7 turns the panel on and
-// off (developer builds). Tab and Enter, the emulator's keys, are the game's Plus on Hookshot. Update turns the panel
-// over when F7 goes down.
+// off (developer builds). Tab, an emulator key, is the game's Plus on Hookshot (Enter too before Longshot v3.2.0).
+// Update turns the panel over when F7 goes down.
 struct Keys {
     bool list = false;
     bool list_press = false;   // F6 went down at this Update
