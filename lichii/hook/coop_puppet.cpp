@@ -2966,7 +2966,7 @@ void OnEvent(const coop::net::Event& event) {
         }
         ++g_emote_serials[emote->player_number];
         const CoopEmote::Def* def = CoopEmote::ById(emote->id);
-        if (def != nullptr && def->sound[0] != ' ') {
+        if (def != nullptr && def->sound[0] != '\0') {
             auto& queue = g_sounds[emote->player_number];
             if (queue.size() >= CoopLinkSound::kHeardMax) {
                 queue.erase(queue.begin());
