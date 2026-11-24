@@ -2038,6 +2038,13 @@ std::array<std::uint64_t, kMinusTabs> g_minus_tab_words{};   // each of ours' T_
 float g_minus_frame_x = 0.0f, g_minus_frame_y = 0.0f;
 bool g_minus_frame = false;
 bool g_minus_ok = false, g_minus_shown = false;
+// The strip's control guide (LookStrip; GuideProbe reads it).
+constexpr int kGuideParts = 5;
+struct GuidePart {
+    std::uint64_t part = 0, icon = 0, words = 0;
+};
+std::array<GuidePart, kGuideParts> g_guide{};
+bool g_guide_logged = false;
 float g_minus_page_x = 0.0f;   // Pa_CoopMinus_00's own x (LookMinusPage), the slide's offsets added to it
 // The strip's L and R labels (T_BtnL_00, T_BtnR_00) and their own places; whether the row is laid out as ours now.
 std::array<std::uint64_t, 2> g_strip_btns{};
@@ -2086,6 +2093,18 @@ void LookStrip(void* ctx, bool calls, const Facts& f, std::uint64_t gen) {
         g_strip_btns[static_cast<std::size_t>(i)] = b;
         if (b != 0) g_strip_btns_x[static_cast<std::size_t>(i)] = Read<float>(b + 0x6c);
     }
+    // (the strip's control guide, Pa_Guide_00..04 = PaGuideKey_00: T_Icon_00 the button letter in External_00,
+    // T_Guide_00 its words; menu-polish-01113's probe: how the game lays them out under our page, GuideProbe)
+    for (int i = 0; i < kGuideParts; ++i) {
+        char name[16];
+        std::snprintf(name, sizeof name, "Pa_Guide_%02d", i);
+        GuidePart& g = g_guide[static_cast<std::size_t>(i)];
+        g.part = FindOwnPane(ctx, f.layout, name);
+        const std::uint64_t part_layout = g.part != 0 ? PartLayout(table, name) : 0;
+        g.icon = part_layout != 0 ? PaneIn(ctx, part_layout, "T_Icon_00") : 0;
+        g.words = part_layout != 0 ? PaneIn(ctx, part_layout, "T_Guide_00") : 0;
+    }
+    g_guide_logged = false;
     for (int i = 0; i < kMinusTabs; ++i) {
         char name[16];
         std::snprintf(name, sizeof name, "Pa_Category_%02d", 4 + i);
@@ -2502,12 +2521,35 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
 
 // The strip's update, g_mutex: the page shown while one of ours is lit, its buttons those with words (MinusWords, set
 // after the lock), the cursor on the Page's row. The tab whose words are due (-1 none).
+// The control guide's probe (menu-polish-01113): once per opening, a second after our page shows, each guide part's
+// place, flags, alpha and its words' drawn width, for the guide filler (A select, B back, ZL / ZR page) to place its
+// entries as the game places its own. Read only.
+void GuideProbe(std::uint64_t now) {
+    static std::uint64_t shown_ms = 0;
+    if (g_guide_logged || !g_minus_on.load()) {
+        if (!g_minus_on.load()) shown_ms = 0;
+        return;
+    }
+    if (shown_ms == 0) shown_ms = now;
+    if (now - shown_ms < 1000) return;
+    g_guide_logged = true;
+    for (int i = 0; i < kGuideParts; ++i) {
+        const GuidePart& g = g_guide[static_cast<std::size_t>(i)];
+        if (g.part == 0) continue;
+        LOG_INFO(Core, "coop: pause tab: guide {}: x {:.0f} y {:.0f} flags {:#x} words {:.0f} wide (icon {}, words {})", i,
+                 Read<float>(g.part + 0x6c), Read<float>(g.part + 0x70), Read<std::uint32_t>(g.part + 0xa8),
+                 g.words != 0 ? Read<float>(g.words + kPaneTextWidth) : -1.0f, g.icon != 0 ? "found" : "none",
+                 g.words != 0 ? "found" : "none");
+    }
+}
+
 int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     if (gen != g_minus_page_gen) {   // (another opening, not looked up: never through the old one's panes)
         g_minus_vis = -1, g_map_hide = false, g_minus_on = false;
         return -1;
     }
     const std::uint64_t now = NowMs();
+    GuideProbe(now);
     const int tab = g_minus_shown ? g_page.MinusTab() : -1;
     // (L back to the Map: ours stays shown, its last tab's rows, while it slides out to the right)
     const bool leaving = tab < 0 && g_minus_shown && g_minus_page_tab >= 0 && MinusSliding(now) &&
