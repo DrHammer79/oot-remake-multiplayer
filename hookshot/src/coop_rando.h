@@ -157,6 +157,13 @@ bool ParseHandSeed(std::string_view value, std::string* hash, std::string* folde
 // again in the folder is read as it is). Nothing outside romfs counts
 // (coop-seed.txt, the kit's marks). Empty: no files, one could not be read, or `stop` turned true.
 std::string SeedFilesHash(const std::filesystem::path& folder, const std::function<bool()>* stop = nullptr);
+// What stands for a mod's game file `file` (romfs path `key`, lower case, '/') in the hash co-op compares
+// (CoopMods::StandIn, row 274: one seed on one kit hashed alike on every PC): nothing for its size tables
+// (romfs/System/Resource/<f>: file sizes, into which the kit, OOTRR and the button prompts merge the other mods' entries
+// on each PC, e.g. Character Select's own looks), the mod's own kept copy of a file the kit's start merged other mods'
+// rows, saved values or archive members into (as SeedFilesHash), else the file itself. Any mod's folder.
+std::optional<std::filesystem::path> ShareStandIn(const std::filesystem::path& folder,
+                                                  const std::filesystem::path& file, const std::string& key);
 // The chat lines about the host's hand-put seed: this game's (a guest) and the one the host gets (TellLine's limit).
 enum class HandMatch { same, missing, different };
 std::string HandLine(HandMatch match, std::string_view folder, bool restart);

@@ -567,6 +567,43 @@ fs::path KeptCopy(const fs::path& folder, const fs::path& live, const fs::path& 
 }
 }  // namespace
 
+namespace {
+// The mod's own copy of a file merge_tables.py merged other mods' rows, saved values or archive members into (kept
+// under `folder`, KeptCopy), else empty. `rel`: the file's romfs path (lower case, '/'); `rel_path`: the same as found.
+fs::path KitKeptCopy(const fs::path& folder, const fs::path& file, const fs::path& rel_path, const std::string& rel) {
+    const fs::path name = file.filename();
+    // Each only while its stamp names the file now (KeptCopy); the stamps are `<kept file>.txt`.
+    const auto per_file = [&](const fs::path& kept) {
+        fs::path stamp = kept;
+        return KeptCopy(folder, file, kept, stamp += ".txt");
+    };
+    if (rel.rfind("rsdb/", 0) == 0 && rel.find('/', 5) == std::string::npos) {
+        if (fs::path kept = per_file(folder / "_coop-rows" / name); !kept.empty()) return kept;
+    }
+    if (rel.rfind("gamedata/", 0) == 0 && rel.find('/', 9) == std::string::npos) {
+        if (fs::path kept = per_file(folder / "_coop-gamedata" / name); !kept.empty()) {
+            return kept;  // (player report 206: other mods' saved values merged in)
+        }
+    }
+    return per_file(folder / "_coop-archives" / rel_path);  // (the pack's or another mod's archive members merged in)
+}
+
+bool IsSizeTablePath(std::string_view rel) {
+    constexpr std::string_view dir = "system/resource/";
+    return rel.substr(0, dir.size()) == dir && rel.find('/', dir.size()) == std::string_view::npos;
+}
+}  // namespace
+
+std::optional<fs::path> ShareStandIn(const fs::path& folder_in, const fs::path& file, const std::string& key) {
+    if (IsSizeTablePath(key) && key.find(".rsizetable") != std::string::npos) return std::nullopt;
+    fs::path folder = folder_in;
+    if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
+    const fs::path rel_path = file.lexically_relative(folder / "romfs");
+    if (rel_path.empty() || rel_path.begin()->string() == "..") return file;  // (not under its romfs)
+    if (fs::path kept = KitKeptCopy(folder, file, rel_path, key); !kept.empty()) return kept;
+    return file;
+}
+
 std::string SeedFilesHash(const fs::path& folder_in, const std::function<bool()>* stop) {
     fs::path folder = folder_in;
     if (!folder.has_filename()) folder = folder.parent_path();  // (a trailing separator)
@@ -583,27 +620,15 @@ std::string SeedFilesHash(const fs::path& folder_in, const std::function<bool()>
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         fs::path from = it->path();
         // The kit's start rewrites these in the mod whose tables win and keeps the mod's own beside (merge_tables.py).
-        const fs::path name = it->path().filename();
-        // Each only while its stamp names the file now (KeptCopy). The size table's stamp is one for the mod, the others'
-        // are `<kept file>.txt`.
-        const auto per_file = [&](const fs::path& kept) {
-            fs::path stamp = kept;
-            return KeptCopy(folder, it->path(), kept, stamp += ".txt");
-        };
+        // The size table's stamp is one for the mod (KeptCopy).
         fs::path kept_copy;
-        if (rel.rfind("system/resource/", 0) == 0 && rel.find('/', 16) == std::string::npos &&
-            !(kept_copy = KeptCopy(folder, it->path(), folder / "_coop-size-table" / name,
-                                   folder / "_coop-size-table" / "merged.txt")).empty()) {
-            from = kept_copy;
-        } else if (rel.rfind("rsdb/", 0) == 0 && rel.find('/', 5) == std::string::npos &&
-                   !(kept_copy = per_file(folder / "_coop-rows" / name)).empty()) {
-            from = kept_copy;
-        } else if (rel.rfind("gamedata/", 0) == 0 && rel.find('/', 9) == std::string::npos &&
-                   !(kept_copy = per_file(folder / "_coop-gamedata" / name)).empty()) {
-            from = kept_copy;  // (player report 206: other mods' saved values merged in)
-        } else if (!(kept_copy = per_file(folder / "_coop-archives" / rel_path)).empty()) {
-            from = kept_copy;  // (the pack's or another mod's archive members merged in)
+        if (IsSizeTablePath(rel)) {
+            kept_copy = KeptCopy(folder, it->path(), folder / "_coop-size-table" / it->path().filename(),
+                                 folder / "_coop-size-table" / "merged.txt");
+        } else {
+            kept_copy = KitKeptCopy(folder, it->path(), rel_path, rel);
         }
+        if (!kept_copy.empty()) from = kept_copy;
         ec.clear();
         files.emplace_back(std::move(rel), std::move(from));
     }

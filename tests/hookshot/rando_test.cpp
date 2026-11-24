@@ -2268,3 +2268,56 @@ TEST_CASE("rando: a hand-put seed's size table that wins counts as an outside mo
     CHECK(OutsideSizeTable(w.mods, {}, &hand_wins) == std::optional<std::string>("randomizer-hand"));
     CHECK_FALSE(OutsideSizeTable(w.mods, {}, &mine_wins));
 }
+
+// Row 274: one seed built on one kit by two players hashes alike in co-op (ShareStandIn), whatever each PC merged into
+// it: its size table (OOTRR builds it beside the other mods' tables, e.g. Character Select's own looks; the button
+// prompts and the kit's start merge into it) and the files the kit merged the puppet pack's rows into (kept copies).
+TEST_CASE("rando: a seed's co-op hash leaves out its size table and reads the kit's kept copies (row 274)") {
+    const fs::path base = ModTestDir("coop-rando-share-hash");
+    const fs::path table = fs::path("System") / "Resource" / "ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs";
+    const fs::path rows = fs::path("RSDB") / "ActorInfo.Product.111.rstbl.byml.zs";
+    const auto pc = [&](const std::string& name, const std::string& chest, const std::string& sizes) {
+        const fs::path mods = base / name;
+        const fs::path seed = mods / "randomizer-utnqymaageg5";
+        Put(seed / "romfs" / "Event" / "Flow.bfevfl.zs", chest);
+        Put(seed / "romfs" / rows, "actor rows");
+        Put(seed / "romfs" / table, sizes);
+        Put(seed / kSeedFile, "UTNQYMAAGEG5\n");
+        return mods;
+    };
+    const auto hash = [](const fs::path& mods, bool stand_in) {
+        const std::vector<CoopMods::Mod> found = CoopMods::Scan(mods);
+        const auto m = std::find_if(found.begin(), found.end(),
+                                    [](const CoopMods::Mod& x) { return x.name == "randomizer-utnqymaageg5"; });
+        REQUIRE(m != found.end());
+        const CoopMods::StandIn pick = [&](const fs::path& file, const std::string& key) {
+            return ShareStandIn(m->folder, file, key);
+        };
+        return CoopMods::HashMod(*m, nullptr, stand_in ? &pick : nullptr).value().game_files;
+    };
+    const fs::path a = pc("a", "chest: hookshot", "sizes with Character Select (player A's looks)");
+    const fs::path b = pc("b", "chest: hookshot", "sizes with Character Select (player B's looks), prompts");
+    CHECK(hash(a, false) != hash(b, false));  // (before: the line said 'built unlike the host's' every time)
+    CHECK(hash(a, true) == hash(b, true));
+    // B's kit start merged the puppet pack's rows into the seed and kept its own copy, with the stamp naming the merge.
+    const fs::path b_seed = b / "randomizer-utnqymaageg5";
+    Put(b_seed / "_coop-rows" / rows.filename(), "actor rows");
+    Put(b_seed / "romfs" / rows, "actor rows + puppet rows");
+    PutKeptStamp(b_seed, fs::path("_coop-rows") / (rows.filename().string() + ".txt"), "coop-rows 1", rows);
+    CHECK(hash(a, true) == hash(b, true));
+    // Another world (other items in chests) still differs, and so do the seed's own rows.
+    CHECK(hash(a, true) != hash(pc("c", "chest: bombs", "sizes"), true));
+    const fs::path d = pc("d", "chest: hookshot", "sizes");
+    Put(d / "randomizer-utnqymaageg5" / "romfs" / rows, "other actor rows");
+    CHECK(hash(a, true) != hash(d, true));
+    // Only size tables are left out: another file in System/Resource still counts.
+    const fs::path e = pc("e", "chest: hookshot", "sizes");
+    Put(e / "randomizer-utnqymaageg5" / "romfs" / "System" / "Resource" / "Other.bin", "x");
+    CHECK(hash(a, true) != hash(e, true));
+    // The same for any mod (not only seeds): e.g. Character Select's own size table.
+    const fs::path f = base / "f" / "OoT Character Select" / "romfs";
+    Put(f / table, "one PC's sizes");
+    CHECK_FALSE(ShareStandIn(base / "f" / "OoT Character Select", f / table,
+                             "system/resource/resourcesizetable.product.111.nin_ounce_nvn2.rsizetable.zs"));
+    CHECK(ShareStandIn(base / "f" / "OoT Character Select" / "", f / "Event" / "x", "event/x") == f / "Event" / "x");
+}

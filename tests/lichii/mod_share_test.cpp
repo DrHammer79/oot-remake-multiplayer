@@ -90,3 +90,60 @@ TEST_CASE("mod share: the host's seed built into other files (another kit's OOTR
     CHECK(mine.find("update to the host's kit") != std::string::npos);
     CHECK(mine.size() <= 200);
 }
+
+namespace {
+ModEntry Marked(const char* id, std::uint8_t hash) {
+    ModEntry e = Mod(id, "0", hash);
+    CoopModShare::MarkHashWay(e.hash);
+    return e;
+}
+}  // namespace
+
+TEST_CASE("mod share: hashes carry how they were made, and two ways are not compared as files (row 274)") {
+    ModHash h{};
+    h[0] = 5;
+    CHECK(CoopModShare::HashWay(h) == 1);  // unmarked: a kit before 0.11.12
+    CoopModShare::MarkHashWay(h);
+    CHECK(CoopModShare::HashWay(h) == CoopModShare::kHashWay);
+    CHECK(CoopModShare::kHashWay == 2);
+    CHECK(h[0] == 5);
+    // The same way: other files are other files (another OOTRR: another world).
+    const ModList host{1, {Marked("randomizer-n2bteykm", 5), Marked("hud", 7)}};
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Marked("randomizer-n2bteykm", 6)}}) == "N2BTEYKM");
+    CHECK(CoopModShare::SeedFilesOther(host, ModList{2, {Marked("randomizer-n2bteykm", 5)}}).empty());
+    std::string seed = "untouched";
+    CHECK(CoopModShare::SeedKitOther(host, ModList{2, {Marked("randomizer-n2bteykm", 6)}}, &seed) == 0);
+    CHECK(seed == "untouched");
+    // A guest on an older kit (unmarked hash): not 'built unlike', but which side is older.
+    const ModList old_guest{2, {Mod("randomizer-n2bteykm", "0", 5), Mod("hud", "0", 7)}};
+    CHECK(CoopModShare::SeedFilesOther(host, old_guest).empty());
+    CHECK(CoopModShare::SeedKitOther(host, old_guest, &seed) < 0);
+    CHECK(seed == "N2BTEYKM");
+    // A host on an older kit: the guest (newer) is told the host's is older.
+    const ModList old_host{1, {Mod("randomizer-n2bteykm", "0", 5)}};
+    CHECK(CoopModShare::SeedKitOther(old_host, ModList{2, {Marked("randomizer-n2bteykm", 5)}}, &seed) > 0);
+    CHECK(CoopModShare::SeedKitOther(old_host, ModList{2, {Mod("randomizer-n2bteykm", "0", 0)}}, &seed) == 0);
+    // The Mods tab: one line for the kits, not one 'your files differ' per mod.
+    CHECK(CoopModShare::Compare(host, old_guest) ==
+          std::vector<std::string>{
+              "your kit is older than the host's: your mod files can't be checked against its (update to its kit)"});
+    CHECK(CoopModShare::Compare(ModList{1, {Mod("hud", "0", 7)}}, ModList{2, {Marked("hud", 8)}}) ==
+          std::vector<std::string>{
+              "the host's kit is older than yours: its mod files can't be checked against yours (the host updates)"});
+    // The chat lines name the side that is older and fit the chat.
+    const std::string older = CoopModShare::SeedKitLine(2, "Rev-the-long-name", "N2BTEYKM", false);
+    CHECK(older.find("player 2 (Rev-the-long-name) is on a older kit") == std::string::npos);
+    CHECK(older.find("is on an older kit than the host's") != std::string::npos);
+    CHECK(older.find("it updates to the host's kit") != std::string::npos);
+    CHECK(older.size() <= 200);
+    const std::string newer = CoopModShare::SeedKitLine(2, "Rev-the-long-name", "N2BTEYKM", true);
+    CHECK(newer.find("is on a newer kit than the host's") != std::string::npos);
+    CHECK(newer.find("the host updates") != std::string::npos);
+    CHECK(newer.size() <= 200);
+    const std::string mine_newer = CoopModShare::SeedKitMineLine("N2BTEYKM", true);
+    CHECK(mine_newer.find("the host's kit is older than yours") != std::string::npos);
+    CHECK(mine_newer.size() <= 200);
+    const std::string mine_older = CoopModShare::SeedKitMineLine("N2BTEYKM", false);
+    CHECK(mine_older.find("update to the host's kit") != std::string::npos);
+    CHECK(mine_older.size() <= 200);
+}
