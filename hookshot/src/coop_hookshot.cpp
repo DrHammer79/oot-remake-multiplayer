@@ -1820,7 +1820,7 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
                 LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0041): `text` stays empty");
             }
             if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_BODY & 1) == 0) {
-                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane body wrap (patch 0038): a talk's box text "
+                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane body wrap (patch 0042): a talk's box text "
                                "is not in `text`");
             }
         }
@@ -2144,8 +2144,8 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
         return 0;
     }
     if (id == HOS_COOP_WRAP_PANE_BODY || id == HOS_COOP_WRAP_PANE_ALIAS) {
-        // The texts of the two setters that skip 0037's call (patch 0038): a letter-animated pane's (x1 the text, w2
-        // its length) and each pane with a matching alias (x1 a reference, as 0037's). The same log. Reads only.
+        // The texts of the two setters that skip 0041's call (patch 0042): a letter-animated pane's (x1 the text, w2
+        // its length) and each pane with a matching alias (x1 a reference, as 0041's). The same log. Reads only.
         if (phase == 0 && CoopPlaytest::On()) {
             const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
             if (id == HOS_COOP_WRAP_PANE_BODY) {

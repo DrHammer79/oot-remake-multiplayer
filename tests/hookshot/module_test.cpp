@@ -920,8 +920,8 @@ TEST_CASE("hookshot: the pane text wrap (patch 0041) is one row in 0005's table,
     CHECK(body.find("Write") == std::string::npos);
 }
 
-TEST_CASE("hookshot: the pane body wraps (patch 0038) are two rows after 0037's, its header hookshot/src's") {
-    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0038-coop-pane-body-wrap.patch");
+TEST_CASE("hookshot: the pane body wraps (patch 0042) are two rows after 0041's, its header hookshot/src's") {
+    const std::string patch = ReadFile(kRepo / "hookshot" / "patches" / "0042-coop-pane-body-wrap.patch");
     CHECK(NewFile(patch, "host/hos_coop_pane_body.h") == ReadFile(kRepo / "hookshot" / "src" / "hos_coop_pane_body.h"));
     char row[128];
     std::snprintf(row, sizeof row, "+    (%u, 0x76a460, (0xd503237f, 0xa9bc7bfd, 0xa9015ff8, 0xa90257f6)),",
@@ -930,7 +930,7 @@ TEST_CASE("hookshot: the pane body wraps (patch 0038) are two rows after 0037's,
     std::snprintf(row, sizeof row, "+    (%u, 0x377a990, (0xd503237f, 0xa9bc7bfd, 0xf9000bf7, 0xa90257f6)),",
                   HOS_COOP_WRAP_PANE_ALIAS);
     CHECK(patch.find(row) != std::string::npos);
-    // After 0037's row, at the table's end.
+    // After 0041's row, at the table's end.
     CHECK(patch.find(" stp x20, x19\n+    # HOS_COOP_WRAP_PANE_BODY") != std::string::npos);
     // The ids are free in the one wrap space (1-9, 16-19, 24, 25).
     for (const unsigned id : {HOS_COOP_WRAP_PANE_BODY, HOS_COOP_WRAP_PANE_ALIAS}) {

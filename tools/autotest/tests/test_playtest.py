@@ -773,7 +773,7 @@ class FakeTalk:
         self.talk, self.hooked, self.verb, self.prompt, self.body = talk, hooked, verb, prompt, body
         self.stall = stall               # (the last box stays up: A does not end the event)
         self.name_after = name_after     # (the body is set before the name pane, as the shop does)
-        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0038's wrap 26 in that pane)
+        self.body_pane = body_pane   # (a pane name: the box text comes through patch 0042's wrap 26 in that pane)
         self.at, self.event, self.cursor, self.picked = None, False, 0, []
         self.frame, self.texts, self.shown, self.presses = 0, [], {}, []
         self.texts.append(self._entry("HUD_00", "T_Rupee_00", "5"))   # (a text before the talk: not a box)
@@ -966,7 +966,7 @@ class TalkTest(unittest.TestCase):
         r = ph.talk(g)
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
 
-    # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0038: Kokiri shop and Mido) -------------
+    # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0042: Kokiri shop and Mido) -------------
     def test_strip_markup_page_break_is_a_space(self):
         # The page break (group 0, type 4, no params) ends a page: its two sides are two sentences, not one word.
         self.assertEqual(ph.strip_markup("Link!" + tag(0, 4) + "Let's go."), "Link! Let's go.")

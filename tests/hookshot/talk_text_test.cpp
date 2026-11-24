@@ -360,7 +360,7 @@ TEST_CASE("talk text: a letter-animated pane's text (wrap 26) is taken as given,
     CHECK(log.Since(0, "").size() == 1);
 }
 
-TEST_CASE("talk text: the alias setter (wrap 27) reads the reference as 0037's and says its wrap") {
+TEST_CASE("talk text: the alias setter (wrap 27) reads the reference as 0041's and says its wrap") {
     Fake m = Window();
     Log log;
     m.Str(kBuf, "Speaker A");
