@@ -1198,4 +1198,17 @@ float MinusRowAlpha(const PageCursor& c, int r);
 // text dim, and while the list has the pad the picked one bright and the others dimmed.
 float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list);
 
+// The frame the game's cursor is on (its focused button's name: Pa_Button_NN a row, Pa_List_NN a line of the list;
+// "" or any other none), for the frames a page gives back to the game.
+struct GameFrame {
+    int row = -1, line = -1;
+    bool operator==(const GameFrame&) const = default;
+};
+GameFrame GameFrameOf(std::string_view focused);
+// Whether a row's (or line's) W_Select_00 shows when the page gives its frames back to the game (review-01112-h: given
+// back as each was at the opening, the row the cursor was on then kept its frame beside the one it is on now, two
+// outlines after B from the list). `all_own` the layout showed every one at the opening (the panes are not what the
+// game's focus moves, its Select animation is): all shown again; else only the one the game's cursor is on now.
+bool GivenBackShown(bool all_own, int index, int game_focus);
+
 }  // namespace CoopPauseTab

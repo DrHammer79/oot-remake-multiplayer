@@ -3285,3 +3285,29 @@ TEST_CASE("pause tab: the - page's list's alphas come from the same pick as its 
     CHECK(MinusLineAlpha(0, 1u, 0, true) == 1.0f);
     CHECK(MinusLineAlpha(0, 1u, 1, true) == 0.45f);
 }
+
+TEST_CASE("pause tab: the frames given back to the game after the list show only where its cursor is now (review-01112-h)") {
+    // The game's focused button's name: a row, a line of the list, or none.
+    CHECK(GameFrameOf("Pa_Button_03") == GameFrame{3, -1});
+    CHECK(GameFrameOf("Pa_List_02") == GameFrame{-1, 2});
+    CHECK(GameFrameOf("Pa_List_07") == GameFrame{-1, kCursorLines - 1});
+    CHECK(GameFrameOf("") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_05") == GameFrame{});   // (System's own buttons: not one of our rows)
+    CHECK(GameFrameOf("Pa_List_08") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_3") == GameFrame{});
+    CHECK(GameFrameOf("Pa_Button_0x") == GameFrame{});
+    CHECK(GameFrameOf("W_Pa_Button_01") == GameFrame{});
+    // The rows' cursor on row 1 at the opening, moved to row 3, Right into the list, B: back to the game, the frame on
+    // row 3 alone (as the opening had them, row 1 kept its frame beside row 3's: two outlines).
+    const GameFrame now = GameFrameOf("Pa_Button_03");
+    int shown = 0;
+    for (int r = 0; r < kRows; ++r) shown += GivenBackShown(false, r, now.row) ? 1 : 0;
+    CHECK(shown == 1);
+    CHECK(GivenBackShown(false, 3, now.row));
+    CHECK_FALSE(GivenBackShown(false, 1, now.row));
+    // No button focused for a moment: no frame of ours left shown (the game's next Select shows its own).
+    for (int r = 0; r < kRows; ++r) CHECK_FALSE(GivenBackShown(false, r, -1));
+    // A layout that showed every frame at the opening (the Select animation, not the pane, is what the focus moves):
+    // all shown again, as it had them.
+    for (int r = 0; r < kRows; ++r) CHECK(GivenBackShown(true, r, now.row));
+}

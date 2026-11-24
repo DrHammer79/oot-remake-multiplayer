@@ -941,7 +941,7 @@ const char* StopAnimAt(void* ctx, std::uint64_t anim, bool last) {
 struct FocusFrame {
     std::uint64_t select = 0, cursor = 0;   // W_Select_00, N_Cursor_00 (0: not in the part)
     std::uint64_t anim = 0;                 // the part's Select animation (0: not found; the panes alone then)
-    bool select_own = false, cursor_own = false;   // W_Select_00, N_Cursor_00 shown as the layout has them (GiveFrameBack)
+    bool select_own = false, cursor_own = false;   // W_Select_00, N_Cursor_00 shown at the opening (AllOwn)
     int set = -1;                           // the animation as last stopped: 1 its last frame, 0 its first, -1 not set
 };
 constexpr std::uint64_t kFrameAgainMs = 250;
@@ -969,13 +969,26 @@ const char* SetFrame(void* ctx, FocusFrame& f, bool on, bool again) {
     return why;
 }
 
-// The frame left to the game again: W_Select_00 and N_Cursor_00 shown as the layout had them, the animation at its
-// first frame if ours had it at its last.
-void GiveFrameBack(void* ctx, FocusFrame& f) {
-    if (f.select != 0) SetVisible(ctx, f.select, f.select_own);
-    if (f.cursor != 0) SetVisible(ctx, f.cursor, f.cursor_own);
+// The frame left to the game again: W_Select_00 and N_Cursor_00 shown or not as the page's give-back says
+// (CoopPauseTab::GivenBackShown: the one the game's cursor is on now), the animation at its first frame if ours had it
+// at its last.
+void GiveFrameBack(void* ctx, FocusFrame& f, bool select_shown, bool cursor_shown) {
+    if (f.select != 0) SetVisible(ctx, f.select, select_shown);
+    if (f.cursor != 0) SetVisible(ctx, f.cursor, cursor_shown);
     if (f.anim != 0 && f.set == 1) StopAnimAt(ctx, f.anim, false);
     f.set = -1;
+}
+
+// Whether the layout showed every found frame's W_Select_00 (or N_Cursor_00) at the opening (GivenBackShown's all_own).
+template <std::size_t N>
+bool AllOwn(const std::array<FocusFrame, N>& frames, bool cursor) {
+    bool any = false;
+    for (const FocusFrame& q : frames) {
+        if ((cursor ? q.cursor : q.select) == 0) continue;
+        if (!(cursor ? q.cursor_own : q.select_own)) return false;
+        any = true;
+    }
+    return any;
 }
 
 // The + page's (Pa_Coop_00's) frames (player report 276). Its rows are copies of System's buttons and the game's focus
@@ -1140,7 +1153,7 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
 
 // The + page's frames from its one cursor (g_plus_cursor), at every update of the pages screen while ours shows: while
 // the list has the pad, no frame on the rows (the game's cursor stays on their button there) and the picked line's
-// frame ours; else every frame the game's again, as the layout has them. `gen` the opening LiveCells looked up.
+// frame ours; else every frame the game's again, from where its cursor is now. `gen` the opening LiveCells looked up.
 void PlusFrames(void* ctx, std::uint64_t gen, bool shown) {
     std::lock_guard lock(g_live_mutex);
     if (gen != g_cells_gen) return;   // (not looked up for this opening yet: LiveCells)
@@ -1148,10 +1161,26 @@ void PlusFrames(void* ctx, std::uint64_t gen, bool shown) {
     const bool ours = shown && c.list;
     if (!ours) {
         if (!g_plus_frames_ours) return;
-        for (FocusFrame& q : g_plus_row_frames) GiveFrameBack(ctx, q);
-        for (FocusFrame& q : g_plus_line_frames) GiveFrameBack(ctx, q);
+        // (given back from where the game's cursor is now, not as each was at the opening: review-01112-h, two outlines
+        // after B from the list)
+        const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+        const std::string game_on =
+            g_pages_screen != 0 ? CoopModScreens::ButtonName(read, CoopModScreens::FocusedButton(read, g_pages_screen)) : "";
+        const CoopPauseTab::GameFrame g = CoopPauseTab::GameFrameOf(game_on);
+        const bool rows_sel = AllOwn(g_plus_row_frames, false), rows_cur = AllOwn(g_plus_row_frames, true);
+        const bool lines_sel = AllOwn(g_plus_line_frames, false), lines_cur = AllOwn(g_plus_line_frames, true);
+        for (int r = 0; r < kRows; ++r) {
+            GiveFrameBack(ctx, g_plus_row_frames[static_cast<std::size_t>(r)], CoopPauseTab::GivenBackShown(rows_sel, r, g.row),
+                          CoopPauseTab::GivenBackShown(rows_cur, r, g.row));
+        }
+        for (int i = 0; i < kLinePanes; ++i) {
+            GiveFrameBack(ctx, g_plus_line_frames[static_cast<std::size_t>(i)],
+                          CoopPauseTab::GivenBackShown(lines_sel, i, g.line), CoopPauseTab::GivenBackShown(lines_cur, i, g.line));
+        }
         g_plus_frames_ours = false;
-        LOG_INFO(Core, "coop: pause tab: the page's frames the game's again (the rows have the pad)");
+        LOG_INFO(Core, "coop: pause tab: the page's frames the game's again (the rows have the pad): the game's cursor on {} "
+                       "(row {}, line {}; all shown as the layout had them: rows {}, lines {})",
+                 game_on.empty() ? std::string("none") : game_on, g.row, g.line, rows_sel, lines_sel);
         return;
     }
     const std::uint64_t now = NowMs();

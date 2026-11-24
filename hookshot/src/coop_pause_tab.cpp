@@ -2243,4 +2243,20 @@ float MinusLineAlpha(int i, std::uint32_t pickable, int picked, bool list) {
     return !list || picked == i ? 1.0f : 0.45f;
 }
 
+
+GameFrame GameFrameOf(std::string_view focused) {
+    GameFrame g;
+    const auto number = [&](std::string_view prefix) {
+        if (focused.size() != prefix.size() + 2 || focused.substr(0, prefix.size()) != prefix) return -1;
+        const char a = focused[prefix.size()], b = focused[prefix.size() + 1];
+        if (a < '0' || a > '9' || b < '0' || b > '9') return -1;
+        return (a - '0') * 10 + (b - '0');
+    };
+    if (const int r = number("Pa_Button_"); r >= 0 && r < kRows) g.row = r;
+    if (const int l = number("Pa_List_"); l >= 0 && l < kCursorLines) g.line = l;
+    return g;
+}
+
+bool GivenBackShown(bool all_own, int index, int game_focus) { return all_own || (index >= 0 && index == game_focus); }
+
 }  // namespace CoopPauseTab
