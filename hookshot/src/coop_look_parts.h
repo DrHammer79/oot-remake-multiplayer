@@ -45,14 +45,18 @@ const std::vector<GearTexture>& Gear();
 
 // The pack's file of the game's own gear texels, and the name a look's
 // painting goes by in the wardrobe: "gear" when the look sets no gear part
-// (the tunic and the Cap trim are not gear: TunicPainting).
+// (the Kokiri tunic is not gear: TunicPainting). The Cap trim is both: the
+// Kokiri tunic's trims are tunic textures, the Goron and Zora tunics' hood
+// trims gear textures (row 278), so a trim colour paints both wardrobes.
 inline constexpr const char* kBase = "gear";
 std::string Name(const CoopLook::Look& look);
 bool AnyGear(const CoopLook::Look& look);
 
 // The gear texels painted in `look` (same textures, same sizes); a texture
 // with no part set, or not in the table, as it is. A metalness texture
-// (UseMetal) has the blocks under each painted metal part set to 0.
+// (UseMetal) has the blocks under each painted metal part set to 0. With a
+// Cap trim colour, a texture's cap blocks (UseCap: the Goron and Zora tunics'
+// hood trims) are painted in it after its parts, from the game's own texels.
 CoopLookTunic::Texels Painted(const CoopLookTunic::Texels& gear, const CoopLook::Look& look);
 
 // The metal parts (#202). The swords, the Hylian and Mirror Shields and the
@@ -172,6 +176,9 @@ CoopLookTunic::Texels TunicPainted(const CoopLookTunic::Texels& green, std::uint
 // tunic, from green's own texels, by the tunic's rule for those textures
 // (their green ends, shaded against the tile's average). With no cap colour
 // they follow the tunic; a pack without cap.bin paints no cap blocks.
+// Row 278: the Goron and Zora tunics' hood trims (Mt_Vest_Armor_Adult_Goron_Alb,
+// Mt_Vest_Armor_Adult_Zora_Alb, Mt_Angin_Acs_Armor_Adult_Zora_Alb) are listed
+// too, from their own models; those are gear textures, painted by Painted.
 struct CapBlocks {
     std::string texture;                  // "Mt_Cloth_Parts_Player_Child_Alb"
     std::uint32_t block = 0;              // bytes of a block: 8 (BC1) or 16
@@ -180,6 +187,13 @@ struct CapBlocks {
 using Cap = std::vector<CapBlocks>;
 // cap.bin's bytes; nothing (and `why`) when they are not one.
 std::optional<Cap> ParseCap(const std::vector<std::uint8_t>& file, std::string* why = nullptr);
+// The Cap trim's blocks of the gear textures (row 278): the table Painted uses
+// from now on (nothing, or a cap.bin made before row 278: the Goron and Zora
+// tunics' trims follow their tunic). The tunic textures' entries in it are the
+// tunic painting's (TunicPainted takes the table itself); Painted passes them over.
+void UseCap(std::shared_ptr<const Cap> cap);
+// How many of the table's textures are gear textures (Gear()): 0 for a pack made before row 278.
+std::size_t GearCapTextures(const Cap& cap);
 // What a tunic painting holds: the tunic's colour (nothing: the game's own
 // green) and the Cap trim's (nothing: as the tunic).
 struct TunicPaint {
@@ -201,6 +215,11 @@ CoopLookTunic::Texels TunicPainted(const CoopLookTunic::Texels& green, const Tun
 std::size_t PaintCap(const Cap& cap, const std::string& name, CoopLookPaint::Format format,
                      std::span<const std::uint8_t> green, std::vector<std::uint8_t>& texels, std::uint32_t colour,
                      double base);
+// The same by any rule (the gear's: its tunic's tones, shaded against that
+// part's average in the game's own texels): `rule`'s colour and base taken as given.
+std::size_t PaintCap(const Cap& cap, const std::string& name, CoopLookPaint::Format format,
+                     std::span<const std::uint8_t> original, std::vector<std::uint8_t>& texels,
+                     const CoopLookPaint::Rule& rule);
 
 // The boots in Link's own model (the adult's Kokiri boots, the child's
 // leather, which holds his belts too): not an item, so no item copies. Every

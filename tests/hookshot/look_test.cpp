@@ -1736,12 +1736,13 @@ TEST_CASE("look: the Cap trim is a part of its own: its number, key, row, settin
     coop::protocol::Message back;
     REQUIRE(coop::protocol::decode(bytes, back) == coop::protocol::Error::none);
     CHECK(std::get<coop::protocol::PlayerLook>(back) == m);
-    // Not gear: the gear's painting and the puppets' copies are not made again for it.
+    // Gear too (row 278): the Goron and Zora tunics' hood trims are gear textures, so a trim colour is its own
+    // painting of the gear and of the puppets' copies.
     Look cap;
     cap[Part::cap_trim] = 0x3070FFu;
-    CHECK_FALSE(CoopLookParts::AnyGear(cap));
-    CHECK(CoopLookParts::Name(cap) == "gear");
-    CHECK(CoopLookParts::Name(look) == CoopLookParts::Name([&] {
+    CHECK(CoopLookParts::AnyGear(cap));
+    CHECK(CoopLookParts::Name(cap) != "gear");
+    CHECK(CoopLookParts::Name(look) != CoopLookParts::Name([&] {
               Look l = look;
               l[Part::cap_trim].reset();
               return l;
@@ -1917,6 +1918,65 @@ TEST_CASE("look parts: the Cap trim paints only the cap's blocks, over the tunic
     CHECK(Changed(t, TextureOf(green, kChildParts).texels, 16) == std::vector<std::size_t>{16, 48});
     CHECK(CoopLookParts::PaintCap(cap, "Something_Else_Alb", Format::astc, TextureOf(green, kChildParts).texels, t,
                                   0xC02020u, 0.2) == 0);
+}
+
+TEST_CASE("look parts (row 278): the Goron and Zora tunics' hood trims take the Cap trim, own Link and puppets") {
+    using CoopLookPaint::Format;
+    // (the Zora feather: a zora_tunic gear texture in BC1, Shield()'s blue ends in every even block)
+    const char* const kZora = "Mt_Feather_Armor_Adult_Zora_Alb";
+    const auto gear = Colour({{kZora, Shield()}, {kHylian, Shield()}});
+    const auto cap = std::make_shared<const CoopLookParts::Cap>(
+        *CoopLookParts::ParseCap(CapFile({{kZora, 8, {0, 32}}, {kChildParts, 16, {16}}})));
+    CHECK(CoopLookParts::GearCapTextures(*cap) == 1);   // the child's parts are the tunic painting's
+    // A pack made before row 278 lists the Kokiri tunic's only.
+    CHECK(CoopLookParts::GearCapTextures(*CoopLookParts::ParseCap(CapFile({{kChildParts, 16, {16}}}))) == 0);
+    Look trim;
+    trim[Part::cap_trim] = 0xC02020u;
+    // No cap.bin: the trim changes no gear byte.
+    CoopLookParts::UseCap(nullptr);
+    for (const auto& t : CoopLookParts::Painted(*gear, trim)) {
+        CHECK(t.texels == Shield());
+    }
+    CoopLookParts::UseCap(cap);
+    // The game's own Zora tunic: only its trim's blocks change, to red; the shield (no cap blocks) stays.
+    const auto own = CoopLookParts::Painted(*gear, trim);
+    REQUIRE(own.size() == 2);
+    CHECK(Changed(own[0].texels, Shield(), 8) == std::vector<std::size_t>{0, 32});
+    CHECK(own[1].texels == Shield());
+    const auto ends_of = [](const std::vector<std::uint8_t>& t, std::size_t at) {
+        return CoopLookPaint::Ends(Format::bc1, std::span<const std::uint8_t>(t.data() + at, 8));
+    };
+    CHECK(CoopLookPaint::ToneOf(ends_of(own[0].texels, 0)[0]) == CoopLookPaint::kRed);
+    CHECK(CoopLookPaint::ToneOf(ends_of(own[0].texels, 16)[0]) == CoopLookPaint::kBlue);   // not the cap's
+    // Over a painted Zora tunic: the trim's blocks differ from the tunic's painting, every other byte the same.
+    Look tunic;
+    tunic[Part::zora_tunic] = 0x20A040u;
+    Look both = tunic;
+    both[Part::cap_trim] = 0xC02020u;
+    const auto alone = CoopLookParts::Painted(*gear, tunic);
+    const auto painted = CoopLookParts::Painted(*gear, both);
+    CHECK(Changed(painted[0].texels, alone[0].texels, 8) == std::vector<std::size_t>{0, 32});
+    CHECK(CoopLookPaint::ToneOf(ends_of(painted[0].texels, 16)[0]) == CoopLookPaint::kGreen);   // the tunic's
+    // Painted from the game's own texels: the trim's blocks are the same whatever the tunic's colour.
+    CHECK(std::equal(own[0].texels.begin(), own[0].texels.begin() + 8, painted[0].texels.begin()));
+    CHECK(std::equal(own[0].texels.begin() + 32, own[0].texels.begin() + 40, painted[0].texels.begin() + 32));
+    // A trim in the tunic's own colour is the tunic's painting byte for byte (the same shading).
+    Look same = tunic;
+    same[Part::cap_trim] = 0x20A040u;
+    CHECK(CoopLookParts::Painted(*gear, same)[0].texels == alone[0].texels);
+    // The Goron tunic's colour leaves the Zora tunic alone; the trim still paints it.
+    Look goron = trim;
+    goron[Part::goron_tunic] = 0x2020C0u;
+    CHECK(CoopLookParts::Painted(*gear, goron)[0].texels == own[0].texels);
+    // The puppets: a copy painted in a look with a trim has the trim too (CopyTexels: Painted, then marked).
+    const auto copy = CoopLookParts::CopyTexels(*gear, 2, trim);
+    REQUIRE(copy.size() == 2);
+    CHECK(copy[0].name == "C2_Feather_Armor_Adult_Zora_Alb");
+    CHECK(copy[0].texels == Marked(own[0].texels, 2));
+    CoopLookParts::CopyLooks looks(2);
+    looks[1] = trim;
+    CHECK(CoopLookParts::CopiesName(looks) != CoopLookParts::kCopiesBase);
+    CoopLookParts::UseCap(nullptr);
 }
 
 TEST_CASE("look tunic: the wardrobe draws the tunic and the Cap trim as one painting") {

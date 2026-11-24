@@ -870,9 +870,17 @@ void StartModule() {
             for (const auto& b : *cap) {
                 blocks += b.offsets.size();
             }
-            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures", blocks, cap->size());
+            const std::size_t gear_textures = CoopLookParts::GearCapTextures(*cap);
+            LOG_INFO(Core, "coop: look: the Cap trim paints {} blocks of {} tunic textures ({} of the Goron and Zora "
+                           "tunics)", blocks, cap->size(), gear_textures);
+            if (gear_textures == 0) {   // (row 278: a pack made before it lists the Kokiri tunic's only)
+                LOG_INFO(Core, "coop: look: coop_look/cap.bin has no Goron or Zora tunic trims: those tunics' hood "
+                               "trims follow the tunic (make the puppet pack again)");
+            }
+            auto shared = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            CoopLookParts::UseCap(shared);   // the gear's: the Goron and Zora hood trims, own Link and puppets
             std::lock_guard lock(g_tunic_mutex);
-            g_tunic_cap = std::make_shared<const CoopLookParts::Cap>(std::move(*cap));
+            g_tunic_cap = std::move(shared);
         } else {
             LOG_WARNING(Core, "coop: look: coop_look/cap.bin: {}; the Cap trim changes nothing", why);
         }
@@ -958,6 +966,7 @@ void StopModule() {
         g_tunic_kept.clear();
         g_tunic_cap.reset();
     }
+    CoopLookParts::UseCap(nullptr);   // (the gear's too: the next start reads cap.bin again)
     CoopLookShare::EnableSlots(false);
     g_number = 0;
     g_textures.reset();
