@@ -566,7 +566,10 @@ if (-not $Rebuild -and -not $CheckOnly -and $Out -ieq $defaultOut -and -not (Fin
         # (marked first: robocopy may copy coop-built-from.txt before longshot.exe or image.bin, and a copy that stops
         # half way must not look built: rows 239/240)
         Start-KitGameWrite $Out 'a copy from another kit'
-        & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XF coop.ini coop-options.ini *.log *_log.txt $KitGameUnfinishedFile | Out-Null
+        # (not that kit's other players: local co-op's local-players\playerN and Nucleus's nucleus-players hold their saves,
+        # and robocopy would follow the instances' links into romfs and mods, a second game each)
+        $xdPlayers = @('local-players', 'nucleus-players') | ForEach-Object { Join-Path $from $_ }
+        & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD @xdPlayers /XF coop.ini coop-options.ini coop-player.ini *.log *_log.txt $KitGameUnfinishedFile | Out-Null
         if ($LASTEXITCODE -ge 8 -or -not (Find-HookshotExe $Out)) {
             Write-Host "  Copying failed (robocopy $LASTEXITCODE): the game is built here instead." -ForegroundColor Yellow
             # (only a folder this copy made: one that was there before may hold the player's own files)
@@ -626,7 +629,7 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and (Test-P
         if ($from -and (& $flat $from) -ne (& $flat $Out)) { $from = '' }
         if ($from) {
             Step "The game: copying the build of this version from the game cache on this PC ($from), instead of building it again"
-            $xd = @('user', 'save', 'autotest-save', 'mods') | ForEach-Object { Join-Path $from $_ }
+            $xd = @('user', 'save', 'autotest-save', 'mods', 'local-players', 'nucleus-players') | ForEach-Object { Join-Path $from $_ }
             # (its build stamp last: a copy that stops half way leaves the old stamp, and the game is built again)
             $xf = @('hookshot_coop.dll', 'coop.ini', 'coop-options.ini', 'longshot_log.txt', 'longshot_log.old.txt', 'control.json', 'longshot_options.ini', 'language.txt',
                 'coop-built-from.txt', $KitGameUnfinishedFile) | ForEach-Object { Join-Path $from $_ }

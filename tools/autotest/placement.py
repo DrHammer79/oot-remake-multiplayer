@@ -9,10 +9,12 @@ works too). Pick it, strongest first:
   1. --display (hookshot.py run, live.py start, placement.py) or -Display (run.ps1, live_start.ps1);
   2. the environment variable OOT_TEST_DISPLAY;
   3. the default, \\\\.\\DISPLAY2.
+"primary" names the primary monitor, whatever its number.
 The name is resolved to the monitor's work area (the screen minus the taskbar) when the games start, never as a
 fixed 0,0, so a display added later, or the same display after the layout moved, only needs the setting changed. A name
-that no monitor has is an error that lists the monitors found (the run does not fall back to another screen: that is
-where the windows would pop up over someone's work).
+asked for (1. or 2.) that no monitor has is an error that lists the monitors found (the run does not fall back to
+another screen: that is where the windows would pop up over someone's work). The default only, on a PC with no DISPLAY2
+(unplugged, renumbered), is the primary monitor.
 
 Windows are placed side by side from the work area's top left, 960x600 each (smaller when the work area is too small,
 so every window is fully on that monitor). Placing never activates a window (SWP_NOACTIVATE) and never restores a
@@ -76,12 +78,21 @@ def normalize(name):
     return n
 
 
-def find_monitor(monitors, name):
-    """The monitor dict (name, work=(l, t, r, b), primary) called name, or a PlacementError that lists those found."""
+PRIMARY = "primary"
+
+
+def find_monitor(monitors, name, primary_if_gone=False):
+    """The monitor dict (name, work=(l, t, r, b), primary) called name ("primary": the primary monitor), or a
+    PlacementError that lists those found. primary_if_gone: a name no monitor has is the primary monitor (for the
+    default display, not one asked for: that monitor was unplugged or renumbered)."""
     want = normalize(name)
     for m in monitors:
-        if normalize(m["name"]) == want:
+        if normalize(m["name"]) == want or (want == PRIMARY.upper() and m.get("primary")):
             return m
+    if primary_if_gone:
+        for m in monitors:
+            if m.get("primary"):
+                return m
     found = ", ".join("%s (%dx%d at %d,%d%s)" % (m["name"], m["work"][2] - m["work"][0], m["work"][3] - m["work"][1],
                                                   m["work"][0], m["work"][1], ", primary" if m.get("primary") else "")
                       for m in monitors) or "none"
@@ -195,7 +206,8 @@ def place_window(hwnd, rect, topmost=False):
 
 def check_display(arg=None):
     """The chosen monitor (dict), or a PlacementError; call it before starting games so a wrong name fails first."""
-    return find_monitor(monitors(), display_name(arg))
+    asked = bool((arg and arg.strip()) or (os.environ.get(ENV) or "").strip())
+    return find_monitor(monitors(), display_name(arg), primary_if_gone=not asked)
 
 
 def place_pids(pids, display=None, topmost=False, wait=0.0, step=0.25, slots=None, count=None):

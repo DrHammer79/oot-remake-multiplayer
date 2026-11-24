@@ -241,6 +241,7 @@ std::vector<nat::Addr> Menu::StunServers() const {
 }
 
 int Menu::HostStart(const HosCoopHostOptions* o) {
+    const bool loopback = loopback_next_.exchange(false);   // (LoopbackNextHost: this start only, refused or not)
     if (o == nullptr || o->size < sizeof(std::uint32_t)) {
         return 0;
     }
@@ -250,6 +251,7 @@ int Menu::HostStart(const HosCoopHostOptions* o) {
     }
     StopThread();  // a failed start's thread, if any
     HostJob job;
+    job.loopback = loopback;
     job.name = NameOr(COOP_HAS(o, HosCoopHostOptions, name) ? o->name : nullptr);
     job.password = Trim(COOP_HAS(o, HosCoopHostOptions, password) ? Text(o->password) : std::string());
     job.port = COOP_HAS(o, HosCoopHostOptions, port) && o->port != 0 ? o->port : coop::protocol::kDefaultPort;
@@ -351,6 +353,10 @@ void Menu::RunHost(HostJob job) {
             // The autotest's in-game host (ParseTestHost): its listener on 127.0.0.1 only, as every test listener.
             config.bind = 0x7F000001u;
             Say("coop: host: test host (LICHII_COOP_TEST_HOST): listening on 127.0.0.1 only");
+        } else if (job.loopback) {
+            // Local co-op's game 1 (kLocalHostEnv, LoopbackNextHost): the games of this PC only, this host alone.
+            config.bind = 0x7F000001u;
+            Say("coop: host: local co-op (OOT_COOP_LOCAL_HOST): listening on 127.0.0.1 only, for this PC's games");
         }
         coop::server::HostService host(config);
         std::string why;

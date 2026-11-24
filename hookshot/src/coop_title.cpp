@@ -1326,18 +1326,59 @@ void Init(const HosCoopApi* api) {
 }
 
 fs::path LookFile() {
+    if (const auto player = PlayerOptionsFile()) {
+        return *player;   // (the look is the player's own: coop-player.ini)
+    }
     return KitOptionsFile().value_or(CoopIni());
 }
 
+std::string LookText() {
+    return KitOptionsFile() || PlayerOptionsFile() ? ReadKitOptions() : ReadText(CoopIni());
+}
+
 void SaveLook(const CoopLook::Look& look) {
-    const auto kit = KitOptionsFile();   // (as LookFile: the kit's, or beside longshot.exe, else coop.ini below)
+    // (as LookText: the kit's file with this player's over it, or the one beside longshot.exe, else coop.ini below)
+    const bool kit = KitOptionsFile() || PlayerOptionsFile();
     std::string coop = ReadText(CoopIni());
-    std::string options = kit ? ReadText(*kit) : std::string();
+    std::string options = kit ? ReadKitOptions() : std::string();
     const bool ok = !CoopLook::WriteSettings(look, coop, kit ? &options : nullptr) ||
-                    (kit ? WriteText(*kit, options) : WriteText(CoopIni(), coop));
+                    (kit ? WriteKitOptions(options) : WriteText(CoopIni(), coop));
     const std::string colour = CoopLook::ColourText(look[CoopLook::Part::tunic]);
     LOG_INFO(Core, "coop: look: colour {} saved to {}{}", colour.empty() ? std::string("by player number") : colour,
-             kit ? "coop-options.ini" : "coop.ini", ok ? "" : " (the file could not be written)");
+             Utf8Path(LookFile().filename()), ok ? "" : " (the file could not be written)");
+}
+
+std::optional<fs::path> PlayerOptionsFile() {
+    const fs::path p = CoopRuntime::GameDir() / "coop-player.ini";
+    std::error_code ec;
+    if (!fs::exists(p, ec)) {
+        return std::nullopt;
+    }
+    return p;
+}
+
+std::string ReadKitOptions() {
+    const auto kit = KitOptionsFile();
+    const std::string text = kit ? ReadText(*kit) : std::string();
+    const auto player = PlayerOptionsFile();
+    return player ? CoopTitleMenu::WithPlayerOptions(text, ReadText(*player)) : text;
+}
+
+bool WriteKitOptions(const std::string& text) {
+    const auto kit = KitOptionsFile();
+    const auto player = PlayerOptionsFile();
+    if (!player) {
+        return kit ? WriteText(*kit, text) : false;
+    }
+    std::string kit_text = kit ? ReadText(*kit) : std::string();
+    const std::string before = kit_text;
+    std::string own;
+    CoopTitleMenu::SplitPlayerOptions(text, kit_text, own);
+    bool ok = WriteText(*player, own);
+    if (kit && kit_text != before) {
+        ok = WriteText(*kit, kit_text) && ok;   // (the other games of this PC read it too: written only when it changed)
+    }
+    return ok;
 }
 
 // Whether `kit` (FindKit's) is this game's own: named (OOT_COOP_KIT, coop-kit.txt), or the game is its
@@ -1369,14 +1410,15 @@ std::optional<fs::path> KitOptionsFile() {
 
 void ApplyKitOptions() {
     const auto file = KitOptionsFile();
-    if (!file) {
+    const auto player = PlayerOptionsFile();
+    if (!file && !player) {
         return;
     }
-    const fs::path kit = file->parent_path();
+    const fs::path kit = file ? file->parent_path() : CoopRuntime::GameDir();
     std::error_code same_ec;
     const bool found = !fs::equivalent(kit, CoopRuntime::GameDir(), same_ec);   // (a kit above the game)
     int set = 0;
-    for (auto [k, v] : CoopTitleMenu::KitVariables(ReadText(*file))) {
+    for (auto [k, v] : CoopTitleMenu::KitVariables(ReadKitOptions())) {   // (this game's coop-player.ini over the kit's)
         if (std::getenv(k.c_str()) != nullptr) {
             continue;   // the launcher set it (or the player did)
         }
@@ -1388,8 +1430,8 @@ void ApplyKitOptions() {
         ++set;
     }
     if (set != 0) {
-        LOG_INFO(Core, "coop: {} switch(es) from {}\\coop-options.ini ({})", set, Utf8Path(kit),
-                 found ? "the game was started without the kit's launcher" : "beside the game: no kit above it");
+        LOG_INFO(Core, "coop: {} switch(es) from {}\\coop-options.ini{} ({})", set, Utf8Path(kit),
+                 player ? " and this game's coop-player.ini" : "", found ? "the game was started without the kit's launcher" : "beside the game: no kit above it");
     }
 }
 

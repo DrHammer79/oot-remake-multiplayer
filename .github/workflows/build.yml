@@ -293,6 +293,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/hosting_test.ps1
       - name: Nucleus handler tests
         run: cscript //nologo //E:jscript tools/nucleus/test_handler.js
+      - name: Kit local co-op (2 to 4 games on one PC) tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/local_coop_test.ps1
       - name: Kit launch-update tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/tests/launch_test.ps1
       - name: Kit test-mode game start (no window activation) tests

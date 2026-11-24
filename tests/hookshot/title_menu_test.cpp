@@ -1270,3 +1270,52 @@ TEST_CASE("title menu: an unchanged relay or room name line is kept as the playe
     CHECK(IniGet(opt, "relay_room") == "new-room");
     CHECK(opt.find("relay=old.example.net:27530   # my friend's\r\n") != std::string::npos);
 }
+
+TEST_CASE("title menu: a player's own settings over the shared kit's, and back into both files") {
+    // (local co-op's local-players\playerN and Nucleus instances: coop-player.ini beside the game, the kit's file shared)
+    CHECK(PlayerKey("LICHII_COOP_PAD"));
+    CHECK(PlayerKey("LICHII_COOP_KEYBOARD"));
+    CHECK(PlayerKey("color"));
+    CHECK(PlayerKey("look_hat"));
+    CHECK_FALSE(PlayerKey("auto_rejoin"));
+    CHECK_FALSE(PlayerKey("LICHII_COOP_MAP"));
+
+    const std::string kit = "auto_rejoin = on\r\ncolor = red\r\nLICHII_COOP_PAD=1\r\nLICHII_COOP_MAP=1\r\n";
+    // No coop-player.ini lines: the kit's player keys are another player's, so they do not count here.
+    const std::string bare = WithPlayerOptions(kit, "");
+    CHECK(IniGet(bare, "auto_rejoin") == "on");
+    CHECK_FALSE(IniGet(bare, "color").has_value());
+    CHECK_FALSE(IniGet(bare, "LICHII_COOP_PAD").has_value());
+    CHECK(IniGet(bare, "LICHII_COOP_MAP") == "1");
+
+    const std::string mine = "LICHII_COOP_PAD=3\r\ncolor = blue\r\nlook_hat = green\r\n";
+    std::string merged = WithPlayerOptions(kit, mine);
+    CHECK(IniGet(merged, "LICHII_COOP_PAD") == "3");
+    CHECK(IniGet(merged, "color") == "blue");
+    CHECK(IniGet(merged, "look_hat") == "green");
+    CHECK(IniGet(merged, "auto_rejoin") == "on");
+
+    // The game edits the merged text (a shared setting and the player's own), then splits it back.
+    merged = IniSet(merged, "auto_rejoin", "off", true);
+    merged = IniSet(merged, "LICHII_COOP_PAD", "2", false);
+    merged = IniUnset(merged, "look_hat");
+    std::string kit_out = kit, player_out;
+    SplitPlayerOptions(merged, kit_out, player_out);
+    CHECK(IniGet(kit_out, "auto_rejoin") == "off");          // the shared one reaches the kit (every game)
+    CHECK(IniGet(kit_out, "color") == "red");                // the kit's own player lines stay as they were
+    CHECK(IniGet(kit_out, "LICHII_COOP_PAD") == "1");
+    CHECK(IniGet(kit_out, "LICHII_COOP_MAP") == "1");
+    CHECK(kit_out.find("look_hat") == std::string::npos);   // (never the kit's: not even a commented line is left there)
+    CHECK(kit_out.find("auto_rejoin = off\r\ncolor = red\r\nLICHII_COOP_PAD=1\r\n") == 0);   // (in place, as it was)
+    CHECK(IniGet(player_out, "LICHII_COOP_PAD") == "2");     // the player's go to coop-player.ini
+    CHECK(IniGet(player_out, "color") == "blue");
+    CHECK_FALSE(IniGet(player_out, "look_hat").has_value());
+    CHECK_FALSE(IniGet(player_out, "auto_rejoin").has_value());
+    CHECK(player_out.find("LICHII_COOP_PAD=2\r\n") != std::string::npos);   // (the kit's KEY=value form for switches)
+    CHECK(player_out.find("color = blue\r\n") != std::string::npos);
+    // Read again, the split files give the same settings.
+    const std::string again = WithPlayerOptions(kit_out, player_out);
+    CHECK(IniGet(again, "LICHII_COOP_PAD") == "2");
+    CHECK(IniGet(again, "auto_rejoin") == "off");
+    CHECK(IniGet(again, "color") == "blue");
+}

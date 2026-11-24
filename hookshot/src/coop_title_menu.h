@@ -40,6 +40,20 @@ std::string IniSet(std::string_view text, std::string_view key, std::string_view
 // default comes back.
 std::string IniUnset(std::string_view text, std::string_view key);
 
+// One player's own settings where several games share one kit (local co-op's
+// <game>\local-players\playerN, Nucleus Co-op's instances): coop-player.ini
+// beside that game's longshot.exe holds them, the kit's coop-options.ini the
+// rest, so a setting changed in the kit reaches every game.
+// Whether `key` is one of them: the controller, the keyboard, the look.
+bool PlayerKey(std::string_view key);
+// The kit's text with the player's lines over it: each player key as
+// coop-player.ini has it, or unset (the kit's value is another player's).
+std::string WithPlayerOptions(std::string_view kit, std::string_view player);
+// `merged` (WithPlayerOptions' text after an edit) back into the two files:
+// `kit` (in: the kit's text before) gets every other line, its own player keys
+// kept as they were; `player` the player keys `merged` sets.
+void SplitPlayerOptions(std::string_view merged, std::string& kit, std::string& player);
+
 // ---------------------------------------------------------------------------
 // What the Settings page edits.
 

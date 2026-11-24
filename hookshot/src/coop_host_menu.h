@@ -69,6 +69,9 @@ public:
     Menu& operator=(const Menu&) = delete;
 
     int HostStart(const HosCoopHostOptions* options);
+    // The next HostStart only (local co-op's game 1, CoopPause's LocalHostStep): its listener on 127.0.0.1 alone, the
+    // session of this PC's games. A later Host from the menu in the same run is a usual host again.
+    void LoopbackNextHost() { loopback_next_ = true; }
     int Join(const HosCoopJoinOptions* options);
     int Answer(const char* code);
     // The host's new join password while hosting (the pause menu's Session view): players who join from now on
@@ -91,6 +94,7 @@ private:
         std::uint32_t pose_upload_kbps = 0;
         bool public_game = false;   // (HosCoopHostOptions::public_game)
         std::string bans_file;      // (HosCoopHostOptions::bans_file)
+        bool loopback = false;      // (LoopbackNextHost: listen on 127.0.0.1 only)
     };
     struct JoinJob {
         std::string name, password;
@@ -117,6 +121,7 @@ private:
     Hooks hooks_;
     std::thread thread_;
     std::atomic<bool> stop_{false};
+    std::atomic<bool> loopback_next_{false};   // (LoopbackNextHost)
     bool direct_connected_ = false;  // a plain address: the client only, no thread
     std::mutex calls_;  // one start, join or leave at a time (the menu and the game's exit)
     mutable std::mutex mutex_;
@@ -145,6 +150,10 @@ std::string ProcessMemoryText();
 // only: such a host listens on 127.0.0.1 alone (Menu::RunHost) and opens no router port or invite.
 inline constexpr const char* kTestHostEnv = "LICHII_COOP_TEST_HOST";
 std::optional<std::pair<std::uint16_t, std::string>> ParseTestHost(std::string_view text);
+// Local co-op's host (the kit's scripts\local-coop.ps1, CoopPause's LocalHostStep): game 1 of 2 to 4 games on one PC
+// hosts at its start, OOT_COOP_LOCAL_HOST=PORT:PASSWORD (as ParseTestHost reads it). That host alone listens on
+// 127.0.0.1 only (Menu::LoopbackNextHost): the session is this PC's.
+inline constexpr const char* kLocalHostEnv = "OOT_COOP_LOCAL_HOST";
 inline constexpr std::uint64_t kMemoryLineMs = 30'000;
 
 } // namespace CoopHostMenu
