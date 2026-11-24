@@ -8,6 +8,7 @@
 # Then "Start Squadala.bat" (start.ps1) and each check it makes before the game starts.
 # Exits 1 when a check fails.
 $ErrorActionPreference = 'Stop'
+$env:OOT_COOP_PROBLEM_ADDRESS_LOOKUP = 'off'   # hermetic: no start here looks up main's problem-report address on GitHub
 $release = Split-Path -Parent $PSScriptRoot
 $kitSrc = Join-Path $release 'kit'
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'

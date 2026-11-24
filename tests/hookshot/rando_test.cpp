@@ -2268,3 +2268,132 @@ TEST_CASE("rando: a hand-put seed's size table that wins counts as an outside mo
     CHECK(OutsideSizeTable(w.mods, {}, &hand_wins) == std::optional<std::string>("randomizer-hand"));
     CHECK_FALSE(OutsideSizeTable(w.mods, {}, &mine_wins));
 }
+
+// Row 274: one seed built on one kit by two players hashes alike in co-op (ShareStandIn), whatever each PC merged into
+// it: its size table (OOTRR builds it beside the other mods' tables, e.g. Character Select's own looks; the button
+// prompts and the kit's start merge into it) and the files the kit merged the puppet pack's rows into (kept copies).
+TEST_CASE("rando: a seed's co-op hash leaves out its size table and reads the kit's kept copies (row 274)") {
+    const fs::path base = ModTestDir("coop-rando-share-hash");
+    const fs::path table = fs::path("System") / "Resource" / "ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs";
+    const fs::path rows = fs::path("RSDB") / "ActorInfo.Product.111.rstbl.byml.zs";
+    const auto pc = [&](const std::string& name, const std::string& chest, const std::string& sizes) {
+        const fs::path mods = base / name;
+        const fs::path seed = mods / "randomizer-utnqymaageg5";
+        Put(seed / "romfs" / "Event" / "Flow.bfevfl.zs", chest);
+        Put(seed / "romfs" / rows, "actor rows");
+        Put(seed / "romfs" / table, sizes);
+        Put(seed / kSeedFile, "UTNQYMAAGEG5\n");
+        return mods;
+    };
+    const auto hash = [](const fs::path& mods, bool stand_in) {
+        const std::vector<CoopMods::Mod> found = CoopMods::Scan(mods);
+        const auto m = std::find_if(found.begin(), found.end(),
+                                    [](const CoopMods::Mod& x) { return x.name == "randomizer-utnqymaageg5"; });
+        REQUIRE(m != found.end());
+        const CoopMods::StandIn pick = [&](const fs::path& file, const std::string& key) {
+            return ShareStandIn(m->folder, file, key);
+        };
+        return CoopMods::HashMod(*m, nullptr, stand_in ? &pick : nullptr).value().game_files;
+    };
+    const fs::path a = pc("a", "chest: hookshot", "sizes with Character Select (player A's looks)");
+    const fs::path b = pc("b", "chest: hookshot", "sizes with Character Select (player B's looks), prompts");
+    CHECK(hash(a, false) != hash(b, false));  // (before: the line said 'built unlike the host's' every time)
+    CHECK(hash(a, true) == hash(b, true));
+    // B's kit start merged the puppet pack's rows into the seed and kept its own copy, with the stamp naming the merge.
+    const fs::path b_seed = b / "randomizer-utnqymaageg5";
+    Put(b_seed / "_coop-rows" / rows.filename(), "actor rows");
+    Put(b_seed / "romfs" / rows, "actor rows + puppet rows");
+    PutKeptStamp(b_seed, fs::path("_coop-rows") / (rows.filename().string() + ".txt"), "coop-rows 1", rows);
+    CHECK(hash(a, true) == hash(b, true));
+    // Another world (other items in chests) still differs, and so do the seed's own rows.
+    CHECK(hash(a, true) != hash(pc("c", "chest: bombs", "sizes"), true));
+    const fs::path d = pc("d", "chest: hookshot", "sizes");
+    Put(d / "randomizer-utnqymaageg5" / "romfs" / rows, "other actor rows");
+    CHECK(hash(a, true) != hash(d, true));
+    // Only size tables are left out: another file in System/Resource still counts.
+    const fs::path e = pc("e", "chest: hookshot", "sizes");
+    Put(e / "randomizer-utnqymaageg5" / "romfs" / "System" / "Resource" / "Other.bin", "x");
+    CHECK(hash(a, true) != hash(e, true));
+    // The same for any mod (not only seeds): e.g. Character Select's own size table.
+    const fs::path f = base / "f" / "OoT Character Select" / "romfs";
+    Put(f / table, "one PC's sizes");
+    CHECK_FALSE(ShareStandIn(base / "f" / "OoT Character Select", f / table,
+                             "system/resource/resourcesizetable.product.111.nin_ounce_nvn2.rsizetable.zs"));
+    CHECK(ShareStandIn(base / "f" / "OoT Character Select" / "", f / "Event" / "x", "event/x") == f / "Event" / "x");
+}
+
+// A #98 (row 274's related case): Character Select's look files are each player's own (its NPC part is an opt-in
+// download; its looks differ per PC), so two players with it are not told 'your files differ'; what changes the game
+// (its menus, saved values, actor tables, text, packs) still counts. Other mods' look files still count.
+TEST_CASE("rando: Character Select's look files are left out of the co-op hash, its game files count (row 274)") {
+    CHECK(IsCharacterSelectFolder("OoT Character Select"));
+    CHECK(IsCharacterSelectFolder("my CHARACTER SELECT v2"));
+    CHECK_FALSE(IsCharacterSelectFolder("randomizer-utnqymaageg5"));
+    CHECK_FALSE(IsCharacterSelectFolder("CharacterSelect"));
+    CHECK(IsLookFile("tex/angin_tile_a_dark_ac3.bntx.zs"));
+    CHECK(IsLookFile("model/player_child.player_child.bfres.zs"));
+    CHECK(IsLookFile("phive/cloth/player_adult_cac.nin_ounce_nvn2.bphcl"));
+    CHECK_FALSE(IsLookFile("phive/shape/dungeon_wall.bphsh"));  // (collision: it changes the world)
+    CHECK(IsLookFile("sound/resource/playervoice_adult_x.bars.zs"));
+    CHECK_FALSE(IsLookFile("ui/layoutarchivecategory.product.100.byml.zs"));
+    CHECK_FALSE(IsLookFile("pack/actor/player_child.pack.zs"));
+    CHECK_FALSE(IsLookFile("texture/x"));  // (only the folders themselves)
+
+    const fs::path base = ModTestDir("coop-rando-share-charsel");
+    const auto pc = [&](const std::string& name, const std::string& folder, const std::string& look,
+                        const std::string& menu, bool npc_part) {
+        const fs::path mod = base / name / folder;
+        Put(mod / "romfs" / "Tex" / "Mt_Boots_Player_Adult_Ac6.bntx.zs", look);
+        Put(mod / "romfs" / "Model" / "Player_Child.Player_Child.bfres.zs", "model " + look);
+        Put(mod / "romfs" / "Sequence" / "CharacterMenu.module.ainb", menu);
+        Put(mod / "romfs" / "GameData" / "GameDataList.Product.110.byml.zs", "saved values");
+        Put(mod / "romfs" / "Pack" / "Actor" / "Player_Child.pack.zs", "pack");
+        if (npc_part) {
+            Put(mod / "romfs" / "Tex" / "Npc_A.bntx.zs", "npc");
+            Put(mod / "romfs" / "Sound" / "Resource" / "PlayerVoice_Adult_X.bars.zs", "voice");
+            Put(mod / "romfs" / "Phive" / "Cloth" / "Player_Adult_CAC.Nin_Ounce_NVN2.bphcl", "cloth");
+        }
+        return base / name;
+    };
+    const auto hash = [](const fs::path& mods, const std::string& folder) {
+        const std::vector<CoopMods::Mod> found = CoopMods::Scan(mods);
+        const auto m = std::find_if(found.begin(), found.end(), [&](const CoopMods::Mod& x) { return x.name == folder; });
+        REQUIRE(m != found.end());
+        const CoopMods::StandIn pick = [&](const fs::path& file, const std::string& key) {
+            return ShareStandIn(m->folder, file, key);
+        };
+        return CoopMods::HashMod(*m, nullptr, &pick).value().game_files;
+    };
+    const std::string cs = "OoT Character Select";
+    const auto a = hash(pc("a", cs, "player A's boots", "menu", false), cs);
+    CHECK(a == hash(pc("b", cs, "player B's boots", "menu", true), cs));  // other looks, NPC part opted in
+    CHECK(a != hash(pc("c", cs, "player A's boots", "another menu", false), cs));  // the game's menu differs
+    // GameData merged by the kit: its kept copy stands for it (the same as a seed's).
+    const fs::path d = pc("d", cs, "boots", "menu", false);
+    const fs::path d_mod = d / cs;
+    const fs::path gd = fs::path("GameData") / "GameDataList.Product.110.byml.zs";
+    Put(d_mod / "_coop-gamedata" / gd.filename(), "saved values");
+    Put(d_mod / "romfs" / gd, "saved values + pack's");
+    PutKeptStamp(d_mod, fs::path("_coop-gamedata") / (gd.filename().string() + ".txt"), "coop-gamedata 1", gd);
+    CHECK(a == hash(d, cs));
+    // A collision shape in Character Select still counts (only Phive/Cloth is a look).
+    const fs::path g = pc("g", cs, "boots", "menu", false);
+    Put(g / cs / "romfs" / "Phive" / "Shape" / "Wall.bphsh", "wall");
+    CHECK(a != hash(g, cs));
+    // A renamed Character Select is known by its own files (characters.json, or the kit's coop-charsel.txt): its looks
+    // are still left out.
+    const fs::path h = pc("h", "CS", "player A's boots", "menu", false);
+    const fs::path i = pc("i", "CS", "player B's boots", "menu", true);
+    CHECK(hash(h, "CS") != hash(i, "CS"));  // (not known yet: a plain mod)
+    Put(h / "CS" / "characters.json", "{}");
+    Put(i / "CS" / "characters.json", "{}");
+    CHECK(hash(h, "CS") == hash(i, "CS"));
+    CHECK(IsCharacterSelectMod(h / "CS"));
+    const fs::path j = base / "j" / "OoT_CS";
+    Put(j / "coop-charsel.txt", "v0.2.2 - - - ui cz2\n");
+    CHECK(IsCharacterSelectMod(j));
+    CHECK_FALSE(IsCharacterSelectMod(base / "e" / "Hylian Tunics"));
+    // Another mod's textures are its content: they still count.
+    const std::string other = "Hylian Tunics";
+    CHECK(hash(pc("e", other, "red", "menu", false), other) != hash(pc("f", other, "blue", "menu", false), other));
+}
