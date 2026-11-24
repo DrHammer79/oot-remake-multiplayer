@@ -3,6 +3,7 @@
 
 #include "coop_i18n.h"
 #include "coop_list_pages.h"
+#include "coop_menu_nav.h"
 #include "coop_text_fit.h"
 
 #include <algorithm>
@@ -60,10 +61,27 @@ const std::string& Letters() {
     return letters;
 }
 
-int MoveKey(int key, int dy) {
+int MoveKey(int key, int dy) { return KeyStep(key, dy, false); }   // (a fresh press: round)
+
+int RowStep(const CoopPauseMenu::View& v, int from, int dir, bool repeat) {
+    const int n = static_cast<int>(v.rows.size());
+    if (from < 0 || from >= n || dir == 0) return from;
+    return CoopMenuNav::Step(from, dir, n, !repeat, [&v](int i) {
+        const CoopPauseMenu::RowKind k = v.rows[static_cast<std::size_t>(i)].kind;
+        return k != CoopPauseMenu::RowKind::kHeading && k != CoopPauseMenu::RowKind::kNote;
+    });
+}
+
+int KeyStep(int key, int dy, bool repeat) {
     const int n = kLastKey - kFirstKey + 1;
-    const int at = (key < kFirstKey || key > kLastKey ? 0 : key - kFirstKey) + dy;
-    return kFirstKey + ((at % n) + n) % n;
+    const int at = key < kFirstKey || key > kLastKey ? 0 : key - kFirstKey;
+    return kFirstKey + CoopMenuNav::Step(at, dy, n, !repeat, [](int) { return true; });
+}
+
+std::size_t LetterStep(std::size_t at, int dx, bool repeat) {
+    const int n = static_cast<int>(Letters().size());
+    return static_cast<std::size_t>(
+        CoopMenuNav::Step(static_cast<int>(at % static_cast<std::size_t>(n)), dx, n, !repeat, [](int) { return true; }));
 }
 
 Look TypingLook(const CoopPauseMenu::View& v, char letter, int key) {

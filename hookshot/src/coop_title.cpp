@@ -1550,20 +1550,19 @@ std::uint64_t NativePad(std::uint64_t buttons, std::int32_t stick[4]) {
         const CoopTitleNative::Look look = CoopTitleNative::LookFor(v, g_native_top, g_page_buttons.load());
         if (v.typing) {
             using CoopTitleNative::Key;
+            // (the keys and Letter's letters on the shared cursor: a repeat stops at an end, a fresh press goes round)
             const int dy = (down & kDown) != 0 ? 1 : (down & kUp) != 0 ? -1 : 0;
-            const int key_to = dy != 0 ? CoopTitleNative::MoveKey(g_native_key, dy) : g_native_key;
-            // (a repeat stops at the first and the last key: going round is for a fresh press)
-            if (dy != 0 && ((repeats & (kUp | kDown)) == 0 || (dy > 0) == (key_to > g_native_key))) {
-                g_native_key = key_to;
+            if (const int to = CoopTitleNative::KeyStep(g_native_key, dy, (repeats & (kUp | kDown)) != 0);
+                dy != 0 && to != g_native_key) {
+                g_native_key = to;
                 g_native_refocus = true, g_sound = CoopMenuNav::kSoundMove;
             }
             const int dx = (down & kRight) != 0 ? 1 : (down & kLeft) != 0 ? -1 : 0;
             if (dx != 0 && g_native_key == static_cast<int>(Key::kLetter)) {
-                const std::size_t n = CoopTitleNative::Letters().size();
-                const std::size_t at = g_native_letter % n;
-                const bool round = (dx < 0 && at == 0) || (dx > 0 && at + 1 == n);
-                if (!round || (repeats & (kLeft | kRight)) == 0) {
-                    g_native_letter = (at + n + static_cast<std::size_t>(static_cast<int>(n) + dx)) % n;
+                const std::size_t to =
+                    CoopTitleNative::LetterStep(g_native_letter, dx, (repeats & (kLeft | kRight)) != 0);
+                if (to != g_native_letter % CoopTitleNative::Letters().size()) {
+                    g_native_letter = to;
                     g_sound = CoopMenuNav::kSoundMove;
                 }
             }
@@ -1592,23 +1591,17 @@ std::uint64_t NativePad(std::uint64_t buttons, std::int32_t stick[4]) {
             // (the step from the row the title shows lit: the mouse's hover moves the game's focus, not the menu's own
             // row, and Down on the last shown row went from an older row, wrapping to the top instead of scrolling on
             // to Room name and Relay, a test run 2026-11-20)
+            // (Up and Down on the shared cursor, CoopTitleNative::RowStep: the menu's own Up or Down is sent only when
+            // the step lands on another row, so a held direction stops at the last row (Menu::Move alone goes round)
+            // and the move sound plays only for a real move)
             const bool on_row = focused >= 0 && focused < look.back && look.rows[static_cast<std::size_t>(focused)] >= 0;
-            if ((repeats & (kUp | kDown)) != 0) {   // (held: on to the next row, never round the end; Menu::Move goes round)
-                const int from = on_row ? look.rows[static_cast<std::size_t>(focused)] : v.selected;
-                const auto pickable = [&v](int i) {
-                    const CoopPauseMenu::RowKind k = v.rows[static_cast<std::size_t>(i)].kind;
-                    return k != CoopPauseMenu::RowKind::kHeading && k != CoopPauseMenu::RowKind::kNote;
-                };
-                const int dir = (repeats & kDown) != 0 ? 1 : -1;
-                if (from < 0 || !CoopMenuNav::CanStep(from, dir, static_cast<int>(v.rows.size()), pickable)) {
-                    down &= ~(kUp | kDown);
-                }
+            const int from = on_row ? look.rows[static_cast<std::size_t>(focused)] : v.selected;
+            const int dir = (down & kDown) != 0 ? 1 : (down & kUp) != 0 ? -1 : 0;
+            if (dir != 0 && CoopTitleNative::RowStep(v, from, dir, (repeats & (kUp | kDown)) != 0) != from) {
+                if (on_row) events.emplace_back(HOS_COOP_MENU_SELECT, from);
+                events.emplace_back(dir < 0 ? HOS_COOP_MENU_UP : HOS_COOP_MENU_DOWN, 0);
+                g_sound = CoopMenuNav::kSoundMove;
             }
-            if ((down & (kUp | kDown)) != 0 && on_row) {
-                events.emplace_back(HOS_COOP_MENU_SELECT, look.rows[static_cast<std::size_t>(focused)]);
-            }
-            if ((down & kUp) != 0) events.emplace_back(HOS_COOP_MENU_UP, 0);
-            if ((down & kDown) != 0) events.emplace_back(HOS_COOP_MENU_DOWN, 0);
             if ((down & kLeft) != 0) events.emplace_back(HOS_COOP_MENU_LEFT, 0);
             if ((down & kRight) != 0) events.emplace_back(HOS_COOP_MENU_RIGHT, 0);
             const bool back = (down & kB) != 0 || ((down & kA) != 0 && focused == look.back);
@@ -1702,7 +1695,6 @@ std::uint64_t NativePad(std::uint64_t buttons, std::int32_t stick[4]) {
                 g_sound = CoopMenuNav::kSoundMove;
             }
             if (!events.empty() && edge_dir == 0) g_native_refocus = true;   // (a scroll by the mouse: its focus stays)
-            if ((down & (kUp | kDown)) != 0) g_sound = CoopMenuNav::kSoundMove;
         }
         if (leave) {   // (the Multiplayer rows again, the title's cursor on the page's row)
             using CoopTitleMenu::TitleDo;

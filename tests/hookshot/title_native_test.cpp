@@ -181,6 +181,36 @@ TEST_CASE("title native: the column is raised until its lowest box ends on the s
     CHECK(500.0f + tall <= kScreenTop + 0.01f);
 }
 
+TEST_CASE("title native: the pages' cursor is the shared one: notes skipped, a held direction never goes round") {
+    View v;
+    v.rows = {R("Heading", "", RowKind::kHeading), R("Code", "X"), R("", "Players  1/4", RowKind::kNote),
+              R("Same network", "Copy"), R("Stop hosting")};
+    // (a fresh press: the next row that can be picked, the note stepped over; round at the ends)
+    CHECK(RowStep(v, 1, 1, false) == 3);
+    CHECK(RowStep(v, 3, -1, false) == 1);
+    CHECK(RowStep(v, 4, 1, false) == 1);    // (the heading is not picked either)
+    CHECK(RowStep(v, 1, -1, false) == 4);
+    // (held: on to the end, and it stays there)
+    CHECK(RowStep(v, 3, 1, true) == 4);
+    CHECK(RowStep(v, 4, 1, true) == 4);
+    CHECK(RowStep(v, 1, -1, true) == 1);
+    CHECK(RowStep(v, -1, 1, false) == -1);   // (no row: nothing)
+    // The typing keys: Letter, Delete, OK; round on a press, not while held
+    const int letter = static_cast<int>(Key::kLetter), ok = static_cast<int>(Key::kOk);
+    CHECK(KeyStep(ok, 1, false) == letter);
+    CHECK(KeyStep(ok, 1, true) == ok);
+    CHECK(KeyStep(letter, -1, true) == letter);
+    CHECK(KeyStep(letter, 1, true) == static_cast<int>(Key::kDelete));
+    CHECK(MoveKey(ok, 1) == letter);   // (MoveKey: a fresh press)
+    // Letter's letters: held Right runs on and stops at the last; a press there goes round to the first
+    const std::size_t last = Letters().size() - 1;
+    CHECK(LetterStep(0, 1, true) == 1);
+    CHECK(LetterStep(last, 1, true) == last);
+    CHECK(LetterStep(last, 1, false) == 0);
+    CHECK(LetterStep(0, -1, true) == 0);
+    CHECK(LetterStep(0, -1, false) == last);
+}
+
 TEST_CASE("title native: a co-op page's column is centred on the screen, the foot and the top kept on it") {
     // (the game's four and the hint at their own place, low on the screen: raised until their middle is the screen's)
     const float r = ColumnCentre(-1000.0f, -470.0f, 0.0f, 1.0f);

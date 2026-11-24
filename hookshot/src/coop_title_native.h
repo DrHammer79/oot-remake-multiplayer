@@ -86,6 +86,15 @@ inline constexpr int kFirstKey = static_cast<int>(Key::kLetter), kLastKey = stat
 const std::string& Letters();
 // The key `key` moved by `dy` (-1 up, +1 down), round the three keys.
 int MoveKey(int key, int dy);
+// The title pages' cursor, on the shared cursor model (coop_menu_nav.h, CoopMenuNav::Step): `repeat` a held
+// direction's repeat (CoopMenuNav::Repeat), which never goes round an end; a fresh press does where the list goes round.
+// - RowStep: Up (-1) or Down (+1) from the view's row `from`, over the rows the menu can select (not headings or notes,
+//   as Menu::Move steps): the row it lands on, `from` when it stays (a repeat at an end, nothing else to pick).
+// - KeyStep: the typing keys (Letter, Delete, OK), round as MoveKey on a fresh press.
+// - LetterStep: Letter's letter `at` moved by `dx` among Letters(), round on a fresh press.
+int RowStep(const CoopPauseMenu::View& v, int from, int dir, bool repeat);
+int KeyStep(int key, int dy, bool repeat);
+std::size_t LetterStep(std::size_t at, int dx, bool repeat);
 // The buttons while the menu's selected row is typed into, `key` focused.
 Look TypingLook(const CoopPauseMenu::View& v, char letter, int key);
 
