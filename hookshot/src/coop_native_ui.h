@@ -15,7 +15,7 @@
 // to the game's own pane setter (f_8045b970). The game's functions and fields are in addr, as main+ offsets of build
 // e0f3ccfaf50065ae (game 1.1.1, the only one co-op supports), each checked on that build's main (docs/game-ui.md).
 //
-// Split for tests: the pure parts (Clean, SplitSpeaker, Columns, Wrap, ChatFeed, TypingLine) and the game steps
+// Split for tests: the pure parts (Clean, SplitSpeaker, Columns, Width, Wrap, ChatFeed, TypingLine) and the game steps
 // (TextTint, Banner), which go through the Game interface (the module's guest memory and its game call), so
 // tests/hookshot/native_ui_test.cpp runs them on a pretend game.
 #pragma once
@@ -95,19 +95,40 @@ struct Said {
 };
 Said SplitSpeaker(std::string_view line);
 
-// How wide a text shows, in columns: a Latin letter 1, a Chinese, Japanese or Korean one (and full-width forms) 2.
+// How many characters a text is, in columns: a Latin letter 1, a Chinese, Japanese or Korean one (and full-width
+// forms) 2. Only for how long a page shows (ChatFeed::Seconds): how WIDE it shows is Width.
 std::size_t Columns(std::string_view utf8);
 
-// The text in pages of at most `lines` lines of at most `columns` columns each (lines joined by '\n', which the
-// game's text panes break at), broken at spaces where it can, inside a word only when the word alone is too long.
-// Never empty for a text with something in it.
-std::vector<std::string> Wrap(std::string_view clean, std::size_t columns, std::size_t lines);
+// How wide a text shows on the game's text panes, in hundredths of an em (the font's size), each character by its
+// advance in the game's own font once SetFontWidths has it, else by kGuess*: never less than the widest of the
+// game's Latin fonts (Cetra Display Pro Regular and Medium, Clarimo UD PE Regular and DemiBold, read for this; "W"
+// is 1.10 em, "i" 0.28), so a guessed line is never wider than it measures. A Chinese, Japanese or Korean character
+// (and full-width forms) is 1 em: those fonts' own full-width advance.
+std::size_t Width(std::string_view utf8);
+inline constexpr std::size_t kGuessSpace = 30, kGuessNarrow = 40, kGuessSlim = 50, kGuessLower = 66,
+                             kGuessUpper = 82, kGuessBroad = 100, kGuessWidest = 112, kWideWidth = 100;
+// The game's own font file (an OpenType or TrueType font: the HUD pack's font-medium.otf, the Latin font of the
+// game's Normal font set, coop_hud) read for each character's advance (its cmap and hmtx tables). False, and the
+// guesses stay, when the bytes are not such a font. From any thread; once is enough.
+bool SetFontWidths(const std::vector<std::uint8_t>& font);
+// The advances read from a font (SetFontWidths' parse), by code point, in hundredths of an em; empty when the bytes
+// are not a font it can read (the cmap needs format 4 or 12). For tests.
+std::vector<std::pair<std::uint32_t, std::uint16_t>> FontWidths(const std::vector<std::uint8_t>& font);
+void ResetFontWidths();   // the guesses again (tests)
+
+// The text in pages of at most `lines` lines of at most `width` (Width) each (lines joined by '\n', which the game's
+// text panes break at), broken at spaces where it can, inside a word only when the word alone is too long. Never
+// empty for a text with something in it.
+std::vector<std::string> Wrap(std::string_view clean, std::size_t width, std::size_t lines);
 
 // What fits on the banner's line (SimpleInfo_00's T_Text_00 is 2100 x 86 at 0.8 in the 3840x2160 layout, inside its
-// W_Bg_00 frame of 1880 x 136: one line). The columns are a safe guess at the game's font: NOT proven on screen (the
-// LANE1 screenshot run settles them).
-inline constexpr std::size_t kBannerColumns = 48, kBannerLines = 1;
-inline constexpr std::size_t kNameColumns = 20;               // a speaker's name at most (the rest of the line is said)
+// W_Bg_00 frame of 1880 x 136: one line). The bar is the game's own: its widest banner text in any language
+// (LayoutMsg/SimpleInfo_00, read from the 1.1.1 romfs for this: German, French, Italian, Spanish and Polish lines of
+// 57 to 62 letters, 27.3 em in Cetra Display Pro Medium, the font the pack carries; English's widest is 22.0 em) fits
+// that pane on one line, so 26 em of ours does, whatever the window size (the layout scales as one). A page is never
+// wider; NOT seen on screen yet (the LANE1 screenshot list in reports/menu-chat-01113.md).
+inline constexpr std::size_t kBannerWidth = 2600, kBannerLines = 1;
+inline constexpr std::size_t kNameWidth = 900;   // a speaker's name at most (the rest of the line is said)
 
 // ---------------------------------------------------------------- chat
 inline constexpr std::size_t kSpeakerBytes = 48;
@@ -163,7 +184,10 @@ private:
 };
 
 // The line being typed as the banner shows it: the speaker, then the end of the typed text that fits the line after
-// "speaker: " ("..." before it when it does not all fit), a caret, and "(not sent)" after a send that failed.
+// "speaker: " ("..." before it when it does not all fit), a caret, and "(not sent)" after a send that failed. A
+// failed line is in kFailedColour (the text box's own colours, as a speaker's): it is plain at a glance that it did not
+// go, the line kept for another Enter; the caller gives a line that did not fail the speaker's colour.
+inline constexpr std::uint32_t kFailedColour = 0xFF5A4A;
 inline constexpr float kTypingSeconds = 60.0f;  // kept up while typing (shown again before it runs out)
 Shown TypingLine(std::string_view speaker, std::string_view typed, bool failed, std::string_view not_sent = "(not sent)");
 
