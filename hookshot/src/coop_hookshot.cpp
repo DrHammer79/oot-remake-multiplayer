@@ -1571,7 +1571,41 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         t_life_pass = 0;
         t_life_dead = 0;
         bool judged = false;
-        *sum = CoopActorEvents::Step(CoopActorEvents::TheRing(), CoopActorEvents::TheLifeTable(), a, own, &judged);
+        // enemy-late-kill: a fall given in place of our replayed hit is dropped once the component's last hit id
+        // reached the replay (its damage step took it, this frame or before); read only while something waits.
+        CoopActorEvents::LifeTable& table = CoopActorEvents::TheLifeTable();
+        std::uint32_t last_id = CoopActorEvents::kNoHitId;
+        bool id_read = true;
+        if (table.Pending(a) != 0 &&
+            !CoopRuntime::Read(a + CoopActorEvents::kLifeLastHitId, &last_id, sizeof last_id)) {
+            id_read = false;
+            last_id = CoopActorEvents::kNoHitId;  // (not reached: the fall is taken, the safe side)
+        }
+        std::uint32_t withdraw = CoopActorEvents::kNoHitId;
+        *sum = CoopActorEvents::Step(CoopActorEvents::TheRing(), table, a, own, &judged, last_id, &withdraw);
+        if (withdraw != CoopActorEvents::kNoHitId) {
+            // The fall was taken in the replay's place: a replay still waiting is withdrawn (its present word
+            // cleared), so its damage step cannot deal the same fall again later. Said (LICHII_COOP_HIT_PROBE).
+            std::uint32_t record_id = 0;
+            std::uint32_t present = 0;
+            std::uint32_t flags = 0;
+            CoopRuntime::Read(a + CoopActorEvents::kLifeRecordId, &record_id, sizeof record_id);
+            CoopRuntime::Read(a + CoopActorEvents::kLifeRecordPresent, &present, sizeof present);
+            CoopRuntime::Read(a + CoopBossNative::addr::kLifeFlags, &flags, sizeof flags);
+            CoopActorEvents::Event e;
+            e.kind = CoopActorEvents::Kind::Refused;
+            e.a = a;
+            e.from = flags;
+            if (CoopActorEvents::WithdrawReplay(withdraw, record_id, present)) {
+                const std::uint32_t none = 0;
+                CoopRuntime::Write(a + CoopActorEvents::kLifeRecordPresent, &none, sizeof none);
+                e.flags |= CoopActorEvents::kWithdrawn;
+            }
+            if (!id_read) {
+                e.flags |= CoopActorEvents::kIdUnread;
+            }
+            CoopActorEvents::TheRing().Push(e);
+        }
         const auto life_now = [a]() -> std::optional<std::int32_t> {
             std::uint64_t value = 0;
             std::int32_t life = 0;
