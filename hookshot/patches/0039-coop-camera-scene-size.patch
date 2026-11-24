@@ -16,12 +16,21 @@ times it, as the upscalers find the scene: Off's stretch, DLSS, FSR, XeSS
 and the game's own), or 640x360 and up as before, until the first upscale
 names the output. The module's own checks are unchanged: the largest
 target of the frame wins, and its camera block must hold the target's size.
+
+With the Upscaler on Game (no engine, not Off) temporal_stand_in left
+before any upscale was seen, so the output was never noted and a low
+Render resolution still had no camera. There it now notes the output
+size (temporal_note_output: by key, or the gameplay formats and a picture
+larger than the input, as Off's stretch) and lets the game's network run.
 ---
- gpu/vk/vk_coop.cpp | 7 ++++++-
- 1 file changed, 6 insertions(+), 1 deletion(-)
+ gpu/vk/vk_coop.cpp     | 7 ++++++-
+ gpu/vk/vk_draw.cpp     | 5 ++++-
+ gpu/vk/vk_temporal.cpp | 7 +++++++
+ gpu/vk/vk_temporal.h   | 6 ++++++
+ 4 files changed, 23 insertions(+), 2 deletions(-)
 
 diff --git a/gpu/vk/vk_coop.cpp b/gpu/vk/vk_coop.cpp
-index d3a2673..c43be90 100644
+index d3a26732..c43be90e 100644
 --- a/gpu/vk/vk_coop.cpp
 +++ b/gpu/vk/vk_coop.cpp
 @@ -17,6 +17,7 @@
@@ -45,6 +54,64 @@ index d3a2673..c43be90 100644
          color0->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32)
          return;
      const uint64_t frame = texture_frame_no();
+diff --git a/gpu/vk/vk_draw.cpp b/gpu/vk/vk_draw.cpp
+index 2e2a77cf..bdc65946 100644
+--- a/gpu/vk/vk_draw.cpp
++++ b/gpu/vk/vk_draw.cpp
+@@ -9182,7 +9182,9 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
+     // 0775215f8da720e6 at 2048x1152), by their shape: a network sampling one texture into one image. temporal_upscale takes those
+     // only when the texture is this frame's scene, in the gameplay networks' input format, and the image the picture)
+     // (Off: the network's stretch; with no engine, frame generation's inputs alone: temporal_fg_inputs, the network runs)
+-    if ((!temporal_wanted() && !temporal_off() && !temporal_fg_inputs()) || p.stages.empty()) return false;
++    // (co-op: the Upscaler's Game too, only to note the output's size: temporal_note_output)
++    const bool note_only = !temporal_wanted() && !temporal_off() && !temporal_fg_inputs();
++    if (p.stages.empty()) return false;
+     const Stage& st = p.stages[0];
+     if (!gameplay_network(p.key) && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
+                                       st.info.image_descriptors.size() == 1))
+@@ -9199,6 +9201,7 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
+     uint32_t level = 0;
+     const uint32_t out_handle = handle_of(s, st, od, 0);
+     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
++    if (note_only) return temporal_note_output(gameplay_network(p.key), in, out, level), false;
+     VkImageView in_view = dw().imgs[0].imageView, out_view = dw().imgs[ntex].imageView;
+     if (in && out && temporal_colour_pair(in->format, out->format) && out->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+         in_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+diff --git a/gpu/vk/vk_temporal.cpp b/gpu/vk/vk_temporal.cpp
+index fc8ebe0a..b2bfa8be 100644
+--- a/gpu/vk/vk_temporal.cpp
++++ b/gpu/vk/vk_temporal.cpp
+@@ -1629,6 +1629,13 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
+ 
+ bool temporal_fg_inputs() { return temporal_mode() == ur::GAME && fsr3fi::frames_wanted() != 0; }
+ 
++void temporal_note_output(bool known, const Texture* in, const Texture* out, uint32_t out_level) {
++    if (!in || !out || !temporal_colour_pair(in->format, out->format)) return;
++    const uint32_t ow = std::max(1u, out->width >> out_level), oh = std::max(1u, out->height >> out_level);
++    if (ow < in->width || oh < in->height || (!known && ow <= in->width)) return;   // (as stretch: an upscale only)
++    note_output(out, out_level);
++}
++
+ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImageView in_view, Texture* out,
+                       VkImageView out_view, uint32_t out_level) {
+     const int mode = temporal_mode();
+diff --git a/gpu/vk/vk_temporal.h b/gpu/vk/vk_temporal.h
+index 2b0f00a7..645f696b 100644
+--- a/gpu/vk/vk_temporal.h
++++ b/gpu/vk/vk_temporal.h
+@@ -96,6 +96,12 @@ bool temporal_hdr_input();
+ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImageView in_view, Texture* out,
+                       VkImageView out_view, uint32_t out_level);
+ 
++/// (co-op) The Upscaler's Game (no engine, not Off, no frame generation): temporal_stand_in does not call temporal_upscale,
++/// and the game's network runs. Its output size is noted all the same, as Off's stretch notes it (known: by its key; else
++/// the gameplay networks' formats and a picture larger than the input), so temporal_scene_size knows the scene's sizes at
++/// any Render resolution (vk_coop.cpp: the co-op camera). Nothing is drawn
++void temporal_note_output(bool known, const Texture* in, const Texture* out, uint32_t out_level);
++
+ /// Once a frame (the game's present): after 120 frames without an upscale by an engine (off, or the upscale not taken) the
+ /// engine's own state, the chain's images and deferred frees are let go, so their video memory comes back. Nothing to do
+ /// costs one atomic load
 -- 
 2.56.0.windows.4
 

@@ -481,8 +481,20 @@ TEST_CASE("hookshot: the camera reaches the module at a low Render resolution to
     CHECK(patch.find("\n+        !(temporal_scene_size(width, height) || (width >= 640 && height >= 360)) ||\n") !=
           std::string::npos);
     CHECK(patch.find("\n+#include \"vk_temporal.h\"") != std::string::npos);
-    // One file, nothing else changed: the module's own checks stay (CameraBlockOk, the largest target wins).
-    CHECK(patch.find("1 file changed") != std::string::npos);
+    // The Upscaler on Game (the default; no engine, not Off): temporal_stand_in left before any upscale, so the output
+    // size was never noted and 33 % had no camera (review, 2026-11-24). It notes the size there, as Off's stretch does,
+    // and the game's network runs.
+    CHECK(patch.find("\n+    const bool note_only = !temporal_wanted() && !temporal_off() && !temporal_fg_inputs();\n") !=
+          std::string::npos);
+    CHECK(patch.find("\n-    if ((!temporal_wanted() && !temporal_off() && !temporal_fg_inputs()) || p.stages.empty()) return false;\n") !=
+          std::string::npos);
+    CHECK(patch.find("\n+    if (note_only) return temporal_note_output(gameplay_network(p.key), in, out, level), false;\n") !=
+          std::string::npos);
+    CHECK(patch.find("\n+void temporal_note_output(bool known, const Texture* in, const Texture* out, uint32_t out_level) {\n") !=
+          std::string::npos);
+    CHECK(patch.find("+    if (ow < in->width || oh < in->height || (!known && ow <= in->width)) return;") != std::string::npos);
+    // Only these files: the module's own checks stay (CameraBlockOk, the largest target wins).
+    CHECK(patch.find("4 files changed") != std::string::npos);
     std::array<float, 0x130 / 4> block{};
     block[0x120 / 4] = 512.0f;
     block[0x124 / 4] = 288.0f;
