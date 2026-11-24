@@ -446,8 +446,10 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   held Up or Down again after 400 ms and then every 90 ms (the typing keys' timing), never round from the last line
   to the first while held (only a fresh press goes round, on a list that goes round), headings and notes are stepped
   over, and the move sound plays only when something moved. Its sound names (`kSoundMove` `button_on`,
-  `kSoundDecide` `button_decide`, `kSoundBack` `button_cancel`) are the ones every page of ours plays; whether the
-  game knows `button_cancel` is still to be read in a run. (code)
+  `kSoundDecide` `button_decide`, `kSoundBack` `mc_ReturnFromDetail`) are the ones every page of ours plays. The
+  `button_cancel` our pages played for B until 0.11.12 is in no table of the game's: the sound link file
+  (`SLink2/slink2.Product.111.bslnk.zs`) names `button_on`, `button_decide`, `button_decide_Cancel`, `mc_OpenDetail`,
+  `mc_ReturnFromDetail` and `SE_Sys_Cancel00`, no `button_cancel` (checked 2026-11-24), so B was silent. (checked)
 
 ## The pause menu
 

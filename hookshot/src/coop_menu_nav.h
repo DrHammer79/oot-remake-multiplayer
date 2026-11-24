@@ -26,11 +26,13 @@ inline constexpr std::uint64_t kRepeatDelayMs = 400;   // held this long: the fi
 inline constexpr std::uint64_t kRepeatEveryMs = 90;    // then one step this often
 
 // The game's menu sounds by name (heard in runs, 2026-11-19: "button_on" at a cursor step, "button_decide" at a
-// choice; the strip's "mc_TabToRight" / "mc_TabToLeft"). kSoundBack is the name our pages have used for B since
-// 0.11.9; whether the game's xlink user knows it is to be read in the lane run (the play call's bit 0: started).
+// choice; the strip's "mc_TabToRight" / "mc_TabToLeft"). Back is "mc_ReturnFromDetail", the game's own back from a
+// detail (docs/game-ui.md "Sounds"): the "button_cancel" our pages played since 0.11.9 is in no table of the game's
+// (the sound link file SLink2/slink2.Product.111.bslnk.zs, read 2026-11-24: button_on, button_decide,
+// button_decide_Cancel, mc_OpenDetail, mc_ReturnFromDetail, SE_Sys_Cancel00; no button_cancel), so B was silent.
 inline constexpr const char* kSoundMove = "button_on";
 inline constexpr const char* kSoundDecide = "button_decide";
-inline constexpr const char* kSoundBack = "button_cancel";
+inline constexpr const char* kSoundBack = "mc_ReturnFromDetail";
 inline constexpr const char* kSoundTabRight = "mc_TabToRight";
 inline constexpr const char* kSoundTabLeft = "mc_TabToLeft";
 
