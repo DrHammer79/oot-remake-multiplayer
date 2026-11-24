@@ -138,6 +138,7 @@ bool g_lines_held = false;   // (the details list's own click: the left button a
 int g_lines_press = -1;
 // The pad's and the mouse's last state for the cells (OnPad, g_mutex).
 std::uint64_t g_browse_last = 0;
+CoopMenuNav::Repeat g_lists_repeat;   // the + page's lists (Find a game cells, Settings, Settings and look): OnPad
 float g_cells_mouse_x = 0, g_cells_mouse_y = 0;
 bool g_cells_held = false;
 int g_cells_press = -1;
@@ -906,6 +907,103 @@ std::array<int, kLinePanes> g_list_arrows_vis{};
 constexpr float kMenuListShift = -400.0f;   // (-520 overlapped the rows' panel, a tester)
 std::atomic<int> g_menu_per_page{kCells};   // (seven with the pack's eighth list row)
 
+// A part's animation by its path from `layout` (kAnimFind), 0 when it is not there.
+std::uint64_t FindPartAnim(void* ctx, std::uint64_t layout, const std::string& path) {
+    const std::uint64_t name = g_api->scratch(ctx, path.c_str(), path.size() + 1);
+    std::uint64_t anim = 0;
+    if (name == 0 || !Call(ctx, kAnimFind, layout, name, 0, 0, 0, &anim)) return 0;
+    return anim;
+}
+
+// An animation found (FindPartAnim) stopped at its first frame or its last; nullptr when done, else why not.
+const char* StopAnimAt(void* ctx, std::uint64_t anim, bool last) {
+    if (anim == 0) return "not found";
+    float frame = 0.0f;
+    if (last) {
+        const std::uint64_t player = Read<std::uint64_t>(anim + kAnimPlayer);
+        std::uint64_t end = 0;
+        if (player == 0 || !Call(ctx, kAnimLastFrame, player, 0, 0, 0, 0, &end)) return "no last frame";
+        frame = static_cast<float>(static_cast<std::int32_t>(end));
+    }
+    HosCoopCall k{};
+    k.function = CoopRuntime::MainBase() + kAnimStopAt;
+    k.x[0] = anim;
+    k.s0 = frame;
+    std::uint64_t r = 0;
+    return g_api->call(ctx, &k, &r) ? nullptr : "not stopped";
+}
+
+// One row's or list line's focus frame on a page of ours (player report 276): the game's own frame W_Select_00 (and the
+// row's N_Cursor_00), shown and hidden by the button's Select animation (lane R1 20261121-085053: the pane alone made
+// visible drew nothing), found once per opening. SetFrame puts it from the page's one cursor (CoopPauseTab::CursorAt) at
+// every update: the panes' shown bits each time (the part's own animations may set them back), the animation when it
+// changes, when it could not be stopped, and every kFrameAgainMs (the game's controller may play Select / UnSelect on
+// a copy of its button: the frame then followed the game's focus, not ours, until our cursor moved again).
+struct FocusFrame {
+    std::uint64_t select = 0, cursor = 0;   // W_Select_00, N_Cursor_00 (0: not in the part)
+    std::uint64_t anim = 0;                 // the part's Select animation (0: not found; the panes alone then)
+    bool select_own = false, cursor_own = false;   // W_Select_00, N_Cursor_00 shown at the opening (AllOwn)
+    int set = -1;                           // the animation as last stopped: 1 its last frame, 0 its first, -1 not set
+};
+constexpr std::uint64_t kFrameAgainMs = 250;
+
+// `part` the part layout holding the button `name`; `layout` and `anim_path` its Select animation's.
+FocusFrame LookFrame(void* ctx, std::uint64_t part, const char* name, std::uint64_t layout, const std::string& anim_path) {
+    FocusFrame f;
+    const std::uint64_t inner = PartLayout(part, name);
+    if (inner == 0) return f;
+    f.select = PaneIn(ctx, inner, "W_Select_00");
+    f.cursor = PaneIn(ctx, inner, "N_Cursor_00");
+    f.select_own = f.select != 0 && (Read<std::uint32_t>(f.select + 0xa8) & 1u) != 0;
+    f.cursor_own = f.cursor != 0 && (Read<std::uint32_t>(f.cursor + 0xa8) & 1u) != 0;
+    f.anim = layout != 0 ? FindPartAnim(ctx, layout, anim_path) : 0;
+    return f;
+}
+
+// The frame shown (`on`) or not; `again` the animation stopped again even if unchanged. nullptr when done, else why not.
+const char* SetFrame(void* ctx, FocusFrame& f, bool on, bool again) {
+    if (f.select != 0) SetVisible(ctx, f.select, on);
+    if (f.cursor != 0) SetVisible(ctx, f.cursor, on);
+    if (f.anim == 0 || (f.set == (on ? 1 : 0) && !again)) return nullptr;
+    const char* why = StopAnimAt(ctx, f.anim, on);
+    f.set = why == nullptr ? (on ? 1 : 0) : -1;   // (not stopped: tried again at the next update)
+    return why;
+}
+
+// The frame left to the game again: W_Select_00 and N_Cursor_00 shown or not as the page's give-back says
+// (CoopPauseTab::GivenBackShown: the one the game's cursor is on now), the animation at its first frame if ours had it
+// at its last.
+void GiveFrameBack(void* ctx, FocusFrame& f, bool select_shown, bool cursor_shown) {
+    if (f.select != 0) SetVisible(ctx, f.select, select_shown);
+    if (f.cursor != 0) SetVisible(ctx, f.cursor, cursor_shown);
+    if (f.anim != 0 && f.set == 1) StopAnimAt(ctx, f.anim, false);
+    f.set = -1;
+}
+
+// Whether the layout showed every found frame's W_Select_00 (or N_Cursor_00) at the opening (GivenBackShown's all_own).
+template <std::size_t N>
+bool AllOwn(const std::array<FocusFrame, N>& frames, bool cursor) {
+    bool any = false;
+    for (const FocusFrame& q : frames) {
+        if ((cursor ? q.cursor : q.select) == 0) continue;
+        if (!(cursor ? q.cursor_own : q.select_own)) return false;
+        any = true;
+    }
+    return any;
+}
+
+// The + page's (Pa_Coop_00's) frames (player report 276). Its rows are copies of System's buttons and the game's focus
+// manager frames the one its cursor is on; while the list has the pad (a game, a key or co-op's menu's line picked:
+// LiveCells' `picked`) that cursor stays on the rows' button, dimmed, while a line of the list is the one lit. Then the
+// rows' frames are hidden and the picked line's own frame (its Options row's W_Select_00 and Select animation) is ours;
+// with the rows' pad they are the game's again. g_live_mutex.
+std::array<FocusFrame, kRows> g_plus_row_frames{};
+std::array<FocusFrame, kLinePanes> g_plus_line_frames{};
+CoopPauseTab::PageCursor g_plus_cursor{};   // from LiveCells' pick (frame_line: the list's pane; list: it has the pad)
+bool g_plus_frames_ours = false;            // the frames set by PlusFrames (false: the game's)
+std::uint64_t g_plus_frames_ms = 0;
+CoopPauseTab::PageCursor g_plus_cursor_set{};
+
 // The rows with nothing on them not shown; the game's cursor on one goes on to the nearest shown (RowSkip, OnPad).
 // g_live_mutex.
 void ApplyBlankRows(void* ctx) {
@@ -926,6 +1024,7 @@ void PlacePane(void* ctx, std::uint64_t pane, float x);   // (below: the pages' 
 void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const SessionView& v) {
     if (g_cells_gen != gen) {
         g_cells_gen = gen;
+        g_plus_row_frames = {}, g_plus_line_frames = {}, g_plus_frames_ours = false;   // (this opening's panes)
         std::uint64_t table = 0;
         Call(ctx, kPaneTable, layout + 0x40, 0, 0, 0, 0, &table);
         const std::uint64_t ours = PartLayout(table, "Pa_Coop_00");
@@ -950,6 +1049,9 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             }
             g_list_arrows[k] = PaneIn(ctx, row, "N_Content_00");
             g_list_box[k] = {PaneIn(ctx, row, "W_Base_01"), PaneIn(ctx, row, "W_Base_03")};
+            char anim[48];
+            std::snprintf(anim, sizeof anim, "Pa_Coop_00/Pa_List_%02d/Select", i);
+            g_plus_line_frames[k] = LookFrame(ctx, ours, name, layout, anim);
             for (std::size_t j = 0; j < 2; ++j) {
                 const std::uint64_t b = g_list_box[k][j];
                 g_list_box_own[k][j] = b != 0 && (Read<std::uint32_t>(b + 0xa8) & 1u) != 0;
@@ -960,6 +1062,7 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
             std::snprintf(name, sizeof name, "Pa_Button_%02d", r);
             const std::uint64_t pane = PaneIn(ctx, ours, name);
             g_row_panes[static_cast<std::size_t>(r)] = IsPart(pane) ? pane : 0;
+            if (IsPart(pane)) g_plus_row_frames[static_cast<std::size_t>(r)] = LookFrame(ctx, ours, name, 0, "");
         }
         g_rows_alpha.fill(-1);
         g_menu_per_page = g_list_panes[kLinePanes - 1] != 0 ? kMenuMost : kCells;
@@ -995,6 +1098,8 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
     for (int c = 0; c < kCells; ++c) games += CellIndex(v.s, c) >= 0 ? 1 : 0;
     g_cell_games = browse ? games : 0;
     const int picked = keys ? v.typing_key : browse ? g_cell.load() : menu ? ml.picked : -1;
+    // (the page's one cursor, player report 276: the line picked has the frame while the list has the pad, PlusFrames)
+    g_plus_cursor = CoopPauseTab::CursorAt(-1, 0, picked >= 0, picked >= 0 ? picked + 1 : -1);
     for (int i = 0; i < kLinePanes; ++i) {
         const std::size_t k = static_cast<std::size_t>(i);
         const std::uint64_t pane = g_list_panes[k];
@@ -1045,6 +1150,56 @@ void LiveCells(void* ctx, std::uint64_t layout, std::uint64_t gen, const Session
         if (g_rows_moment.load()) break;   // (a moment's hiding: SystemButtons sets them back, then they are set again)
         if (g_row_panes[k] != 0 && g_rows_alpha[k] != alpha) CallAlpha(ctx, g_row_panes[k], alpha), g_rows_alpha[k] = alpha;
     }
+}
+
+// The + page's frames from its one cursor (g_plus_cursor), at every update of the pages screen while ours shows: while
+// the list has the pad, no frame on the rows (the game's cursor stays on their button there) and the picked line's
+// frame ours; else every frame the game's again, from where its cursor is now. `gen` the opening LiveCells looked up.
+void PlusFrames(void* ctx, std::uint64_t gen, bool shown) {
+    std::lock_guard lock(g_live_mutex);
+    if (gen != g_cells_gen) return;   // (not looked up for this opening yet: LiveCells)
+    const CoopPauseTab::PageCursor c = g_plus_cursor;
+    const bool ours = shown && c.list;
+    if (!ours) {
+        if (!g_plus_frames_ours) return;
+        // (given back from where the game's cursor is now, not as each was at the opening: review-01112-h, two outlines
+        // after B from the list)
+        const auto read = [](std::uint64_t a, void* out, std::size_t n) { return CoopRuntime::Read(a, out, n); };
+        const std::string game_on =
+            g_pages_screen != 0 ? CoopModScreens::ButtonName(read, CoopModScreens::FocusedButton(read, g_pages_screen)) : "";
+        const CoopPauseTab::GameFrame g = CoopPauseTab::GameFrameOf(game_on);
+        const bool rows_sel = AllOwn(g_plus_row_frames, false), rows_cur = AllOwn(g_plus_row_frames, true);
+        const bool lines_sel = AllOwn(g_plus_line_frames, false), lines_cur = AllOwn(g_plus_line_frames, true);
+        for (int r = 0; r < kRows; ++r) {
+            GiveFrameBack(ctx, g_plus_row_frames[static_cast<std::size_t>(r)], CoopPauseTab::GivenBackShown(rows_sel, r, g.row),
+                          CoopPauseTab::GivenBackShown(rows_cur, r, g.row));
+        }
+        for (int i = 0; i < kLinePanes; ++i) {
+            GiveFrameBack(ctx, g_plus_line_frames[static_cast<std::size_t>(i)],
+                          CoopPauseTab::GivenBackShown(lines_sel, i, g.line), CoopPauseTab::GivenBackShown(lines_cur, i, g.line));
+        }
+        g_plus_frames_ours = false;
+        LOG_INFO(Core, "coop: pause tab: the page's frames the game's again (the rows have the pad): the game's cursor on {} "
+                       "(row {}, line {}; all shown as the layout had them: rows {}, lines {})",
+                 game_on.empty() ? std::string("none") : game_on, g.row, g.line, rows_sel, lines_sel);
+        return;
+    }
+    const std::uint64_t now = NowMs();
+    const bool moved = !g_plus_frames_ours || !(c == g_plus_cursor_set);
+    const bool again = moved || now - g_plus_frames_ms >= kFrameAgainMs;
+    if (again) g_plus_frames_ms = now;
+    for (FocusFrame& q : g_plus_row_frames) SetFrame(ctx, q, false, again);
+    std::string why_all;
+    for (int i = 0; i < kLinePanes; ++i) {
+        if (const char* why = SetFrame(ctx, g_plus_line_frames[static_cast<std::size_t>(i)], i == c.frame_line, again)) {
+            if (i == c.frame_line) why_all = why;
+        }
+    }
+    if (moved) {
+        LOG_INFO(Core, "coop: pause tab: the page's cursor on its list's line {} (the rows' frames hidden){}{}", c.frame_line,
+                 why_all.empty() ? "" : ": its Select animation ", why_all);
+    }
+    g_plus_frames_ours = true, g_plus_cursor_set = c;
 }
 
 // --- The Settings page (the sixth tab: Longshot's options; coop_pause_tab.h "The Settings page") ---
@@ -1975,6 +2130,8 @@ MinusSlideOffsets MinusSlideNow(std::uint64_t now_ms) {
     return MinusSlideAt(g_mslide_from.load(), g_mslide_to.load(), SlideProgress(now_ms - g_mslide_ms.load()));
 }
 
+bool SnailCodeInGame();   // (below: whether Character Select's code fills the strip's slot 3)
+
 void ApplyMinus(void* ctx, const Facts& f, const Page::Do& d) {
     const std::uint64_t tabs = Read<std::uint64_t>(f.screen + kStripTabArray);
     if (f.layout == 0 || tabs == 0 || !g_minus_ok || !d.set_minus) return;
@@ -1984,6 +2141,7 @@ void ApplyMinus(void* ctx, const Facts& f, const Page::Do& d) {
         // mc_TabToRight / mc_TabToLeft is the Page's strip sound)
         g_mslide_from = g_minus_lit_was, g_mslide_to = d.minus_lit, g_mslide_ms = NowMs();
     }
+    const int lit_before = g_minus_lit_was;
     g_minus_lit_was = d.minus_shown ? d.minus_lit : -1;
     if (!d.minus_shown) g_mslide_ms = 0;
     for (int i = 0; i < kMinusTabs; ++i) SetVisible(ctx, g_minus_panes[static_cast<std::size_t>(i)], d.minus_shown);
@@ -2007,6 +2165,16 @@ void ApplyMinus(void* ctx, const Facts& f, const Page::Do& d) {
     for (int slot = 2; slot <= 3; ++slot) {
         const std::uint64_t t = Read<std::uint64_t>(tabs + 8 * static_cast<std::uint64_t>(slot));
         if (t != 0 && d.minus_lit >= 0) Call(ctx, kTabLight, t, 0, 0);
+    }
+    // (L from our first tab back to the Map, row 276: ours unlit above, and the Map the game's own current tab all along
+    // (our R never reached it) but unlit by us when ours was lit; nothing lit it again, so the strip showed no tab lit
+    // over the Map page. Lit again as the game has it. Native: the game's L closes CoopMenu_00 and the sequence lights it.)
+    if (d.minus_lit < 0 && lit_before >= 0 && !g_minus_native && f.lit == kMapCategory) {
+        const int slot = GameTabsShown(g_game_tabs[3] != 0 && (Read<std::uint32_t>(g_game_tabs[3] + 0xa8) & 1u) != 0,
+                                       SnailCodeInGame()) - 1;
+        const std::uint64_t t = slot >= 0 ? Read<std::uint64_t>(tabs + 8 * static_cast<std::uint64_t>(slot)) : 0;
+        if (t != 0) Call(ctx, kTabLight, t, 1, 0);
+        LOG_INFO(Core, "coop: pause tab: the - menu: the Map's tab (slot {}) lit again{}", slot, t != 0 ? "" : ": not there");
     }
     if (d.fill_minus) LOG_INFO(Core, "coop: pause tab: the - menu's tabs of ours shown and filled");
     if (d.minus_slide != 0) {
@@ -2096,10 +2264,15 @@ std::uint64_t g_minus_page = 0, g_minus_part = 0;      // Pa_CoopMinus_00's pane
 std::uint64_t g_minus_layout = 0;                       // the strip's layout they were found in (its animations by path)
 bool g_minus_anim_said = false;                         // (the focus animations' result said once per opening)
 std::uint64_t g_minus_page_gen = 0;                     // the strip's opening they were looked up for
-std::array<std::uint64_t, kRows> g_minus_buttons{}, g_minus_cursors{};
-// Each button's W_Select_00: the focus frame the game shows (lane R1: a frame stayed on the last button copied and our
-// N_Cursor_00 moved nothing; PaCommonBtnThin_00's Select / UnSelect animations show and hide W_Select_00)
-std::array<std::uint64_t, kRows> g_minus_selects{};
+std::array<std::uint64_t, kRows> g_minus_buttons{};
+// Each button's and each list line's focus frame (FocusFrame: lane R1, a frame stayed on the last button copied and our
+// N_Cursor_00 moved nothing; PaCommonBtnThin_00's Select / UnSelect animations show and hide W_Select_00), all set from
+// the page's one cursor (g_minus_cursor, player report 276).
+std::array<FocusFrame, kRows> g_minus_row_frames{};
+std::array<FocusFrame, kLinePanes> g_minus_line_frames{};
+CoopPauseTab::PageCursor g_minus_cursor{};   // the cursor as last set (-1s: none)
+bool g_minus_cursor_set = false;             // (false: set again at the next update, the frames with it)
+std::uint64_t g_minus_frames_ms = 0;         // the frames' animations last stopped again (kFrameAgainMs)
 std::vector<std::uint64_t> g_minus_hide;               // (that layout's panes ours never shows)
 // The page's list on the right (its Pa_List_00..07, the game's Options rows, as the + page's was): a view's details,
 // the game browser's games, the typing keys, co-op's menu's page (Co-op settings) or the Mods tab's. Their panes, each
@@ -2146,13 +2319,18 @@ constexpr const char* kKeyIconLabels[] = {"ZL", "ZR"};
 constexpr const char* kKeyIconSystem[] = {"Pa_System_00-Pa_SystemController_00-Pa_BtnZL_00-T_IconL_00",
                                           "Pa_System_00-Pa_SystemController_00-Pa_BtnZR_00-T_IconR_00"};
 std::array<ListLine, kLinePanes> g_minus_lines{};       // (g_mutex) the lines shown; name "" not shown
-std::array<float, kLinePanes> g_minus_line_alpha{};      // (g_mutex) each line's alpha
-float g_minus_rows_alpha = 1.0f;                         // (g_mutex) the rows: dimmed while the list has the pad
+// (g_mutex) what MinusWords last read for the cursor: the lines that can be picked, the line it had picked (co-op's
+// menu's selection or a field's key; -1 none), whether the list's moves are co-op's menu's own (raw: its pick then,
+// else the Page's line while the list has the pad, read at each update: ApplyMinusPage)
+std::uint32_t g_minus_pickable = 0;
+int g_minus_words_picked = -1;
+bool g_minus_raw = false;
+std::array<float, kLinePanes> g_minus_line_alpha{};      // (g_mutex) each line's alpha as last worked out (ApplyMinusPage)
 std::array<float, kRows> g_minus_rows_set{};
 bool g_minus_mods_shown = false;                          // the Mods tab's page told it shows (HOS_COOP_MENU_SHOW)
 int g_minus_mods_top = 0;
 int g_minus_vis = -1;                                   // the page shown (1) or not (0) as last set; -1 not set
-int g_minus_page_tab = -1, g_minus_focus = -1;          // the tab its rows are for, the row its cursor shows on
+int g_minus_page_tab = -1;                              // the tab its rows are for
 std::uint32_t g_minus_shown_rows = ~0u;                 // the buttons shown as last set
 std::uint64_t g_minus_rows_ms = 0;                      // the rows' words last read
 std::array<std::string, kRows> g_minus_texts{};
@@ -2183,28 +2361,6 @@ std::array<bool, kMapContentPanes> g_map_content_was{};
 std::array<float, kMapContentPanes> g_map_content_x{};   // their own x when a slide began
 bool g_map_sliding = false;
 bool g_map_hidden = false;                              // (the map screen's updates: one thread)
-
-// A part's animation (a path from `layout`, kAnimFind) stopped at its first frame or its last, the title's BtnNum way.
-// nullptr when done, else why not.
-const char* StopPartAnim(void* ctx, std::uint64_t layout, const std::string& path, bool last) {
-    const std::uint64_t name = g_api->scratch(ctx, path.c_str(), path.size() + 1);
-    if (name == 0) return "no scratch";
-    std::uint64_t anim = 0;
-    if (!Call(ctx, kAnimFind, layout, name, 0, 0, 0, &anim) || anim == 0) return "not found";
-    float frame = 0.0f;
-    if (last) {
-        const std::uint64_t player = Read<std::uint64_t>(anim + kAnimPlayer);
-        std::uint64_t end = 0;
-        if (player == 0 || !Call(ctx, kAnimLastFrame, player, 0, 0, 0, 0, &end)) return "no last frame";
-        frame = static_cast<float>(static_cast<std::int32_t>(end));
-    }
-    HosCoopCall k{};
-    k.function = CoopRuntime::MainBase() + kAnimStopAt;
-    k.x[0] = anim;
-    k.s0 = frame;
-    std::uint64_t r = 0;
-    return g_api->call(ctx, &k, &r) ? nullptr : "not stopped";
-}
 
 // The page's controller picture's ZL and ZR keys (MinusKeys), in the page's part layout `part`: found, the rest of the
 // picture and the keys' labels hidden, the keys placed beside the heading; the picture itself then shown by
@@ -2274,9 +2430,10 @@ void ApplyMinusKeys(void* ctx, bool paged, float alpha) {
 void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
     g_minus_page_gen = gen;
     g_minus_layout = layout, g_minus_anim_said = false;
-    g_minus_page = 0, g_minus_part = 0, g_minus_buttons = {}, g_minus_cursors = {}, g_minus_selects = {};
+    g_minus_page = 0, g_minus_part = 0, g_minus_buttons = {}, g_minus_row_frames = {}, g_minus_line_frames = {};
     g_minus_hide.clear();
-    g_minus_vis = -1, g_minus_page_tab = -1, g_minus_focus = -1, g_minus_shown_rows = ~0u, g_minus_rows_ms = 0;
+    g_minus_vis = -1, g_minus_page_tab = -1, g_minus_shown_rows = ~0u, g_minus_rows_ms = 0;
+    g_minus_cursor_set = false, g_minus_frames_ms = 0, g_minus_pickable = 0, g_minus_words_picked = -1, g_minus_raw = false;
     g_minus_texts = {};
     g_map_hide = false, g_minus_on = false;   // (a new opening: nothing of ours shown yet)
     ++g_minus_live_epoch;                     // (its panes' texts set again: MinusWords)
@@ -2295,8 +2452,9 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         const std::uint64_t b = PaneIn(ctx, part, name);
         if (!IsPart(b)) continue;
         g_minus_buttons[static_cast<std::size_t>(r)] = b;
-        g_minus_cursors[static_cast<std::size_t>(r)] = PaneIn(ctx, PartLayout(part, name), "N_Cursor_00");
-        g_minus_selects[static_cast<std::size_t>(r)] = PaneIn(ctx, PartLayout(part, name), "W_Select_00");
+        char anim[48];
+        std::snprintf(anim, sizeof anim, "Pa_CoopMinus_00/Pa_Button_%02d/Select", r);
+        g_minus_row_frames[static_cast<std::size_t>(r)] = LookFrame(ctx, part, name, layout, anim);
         ++found;
     }
     for (const char* name : {"Pa_SystemController_00", "Pa_Button_05", "Pa_Button_06", "Pa_Button_07"}) {
@@ -2317,18 +2475,22 @@ void LookMinusPage(void* ctx, std::uint64_t layout, std::uint64_t gen) {
         l.arrows = PaneIn(ctx, row, "N_Content_00");
         l.box = {PaneIn(ctx, row, "W_Base_01"), PaneIn(ctx, row, "W_Base_03")};
         for (std::size_t j = 0; j < 2; ++j) l.box_own[j] = l.box[j] != 0 && (Read<std::uint32_t>(l.box[j] + 0xa8) & 1u) != 0;
+        char anim[48];
+        std::snprintf(anim, sizeof anim, "Pa_CoopMinus_00/Pa_List_%02d/Select", i);
+        g_minus_line_frames[static_cast<std::size_t>(i)] = LookFrame(ctx, part, name, layout, anim);
     }
     g_minus_lines = {}, g_minus_line_alpha.fill(1.0f), g_minus_rows_set.fill(-1.0f);
     LookMinusKeys(ctx, part);
     if (found == kRows) g_minus_page = page, g_minus_part = part, g_minus_page_x = Read<float>(page + 0x6c);
     g_minus_help = PaneIn(ctx, part, "Pa_CoopHelp_00"), g_minus_help_text.clear(), g_minus_help_vis = -1;
     if (g_minus_help != 0) SetVisible(ctx, g_minus_help, false), g_minus_help_vis = 0;   // (shown with a help: ApplyMinusPage)
-    int frames = 0;
-    for (const std::uint64_t q : g_minus_selects) frames += q != 0 ? 1 : 0;
-    LOG_INFO(Core, "coop: pause tab: the - menu's page (Pa_CoopMinus_00): {} of {} buttons, {} focus frames (W_Select_00), "
-                   "{} list rows, {}{}",
-             found, kRows, frames, lists, g_minus_help != 0 ? "the help's caption" : "no help caption (an older pack)",
-             found == kRows ? "" : " (not used)");
+    int frames = 0, anims = 0, line_frames = 0, line_anims = 0;
+    for (const FocusFrame& q : g_minus_row_frames) frames += q.select != 0 ? 1 : 0, anims += q.anim != 0 ? 1 : 0;
+    for (const FocusFrame& q : g_minus_line_frames) line_frames += q.select != 0 ? 1 : 0, line_anims += q.anim != 0 ? 1 : 0;
+    LOG_INFO(Core, "coop: pause tab: the - menu's page (Pa_CoopMinus_00): {} of {} buttons, {} focus frames (W_Select_00, "
+                   "{} Select animations), {} list rows ({} frames, {} Select animations), {}{}",
+             found, kRows, frames, anims, lists, line_frames, line_anims,
+             g_minus_help != 0 ? "the help's caption" : "no help caption (an older pack)", found == kRows ? "" : " (not used)");
 }
 
 // The strip's update, g_mutex: the page shown while one of ours is lit, its buttons those with words (MinusWords, set
@@ -2362,7 +2524,8 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     }
     if (tab < 0) return -1;   // (leaving: its rows as they were)
     if (tab != g_minus_page_tab) {   // (another tab: its rows read again before they show)
-        g_minus_page_tab = tab, g_minus_rows_ms = 0, g_minus_shown_rows = ~0u, g_minus_focus = -1;
+        g_minus_page_tab = tab, g_minus_rows_ms = 0, g_minus_shown_rows = ~0u, g_minus_cursor_set = false;
+        g_minus_pickable = 0, g_minus_words_picked = -1, g_minus_raw = false;   // (the last tab's pick not this one's cursor)
         g_minus_texts = {}, g_minus_help_text.clear();
     }
     // (the help: shown while what is selected has one, its words set by MinusWords)
@@ -2374,38 +2537,50 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     g_page.SetMinusRows(rows);
     if (rows != g_minus_shown_rows) {
         for (int r = 0; r < kRows; ++r) SetVisible(ctx, g_minus_buttons[static_cast<std::size_t>(r)], ((rows >> r) & 1u) != 0);
-        g_minus_shown_rows = rows, g_minus_focus = -1;
+        g_minus_shown_rows = rows, g_minus_cursor_set = false;
     }
-    const int focus = rows != 0 ? g_page.MinusRow() : -1;
-    // (the game's focus frame on the row picked, as on System's own focused button. Set at every update: the part's
-    // own animation may set it back, lane R1)
+    // The page's one cursor (player report 276), read from the Page at this update: the rows' (MinusRow) or, while
+    // the list or a field's keys have the pad, the list's line (the Page's MinusLine, or co-op's menu's own pick and a
+    // key as MinusWords read them). The frame and every alpha below come from it, so the outline is on the one row or
+    // line shown bright or on none (the brightness came from MinusWords' pass, up to 250 ms after the frame moved).
+    const bool in_list = g_page.MinusInList();
+    const bool list_now = in_list || g_page.Typing() >= 0;
+    const int picked = !g_minus_raw && in_list ? g_page.MinusLine() : g_minus_words_picked;
+    const CoopPauseTab::PageCursor cursor = CoopPauseTab::CursorAt(g_page.MinusRow(), rows, list_now, picked);
+    const bool moved = !g_minus_cursor_set || !(cursor == g_minus_cursor);
+    // (the frame itself is the button's own Select animation, as the game's buttons show it: lane R1 20261121-085053, the
+    // pane alone made visible drew nothing, as PaCommonBtnThin_00's FunctionalAnimSelect / UnSelect key it and no
+    // button controller plays them on the strip's copies; native, on CoopMenu_00, the game's may: stopped again every
+    // kFrameAgainMs. The framed one's Select at its last frame, the others' at its first.)
+    const bool again = moved || now - g_minus_frames_ms >= kFrameAgainMs;
+    if (again) g_minus_frames_ms = now;
+    std::string anim_why;
     for (int r = 0; r < kRows; ++r) {
         const std::size_t k = static_cast<std::size_t>(r);
-        if (g_minus_cursors[k] != 0) SetVisible(ctx, g_minus_cursors[k], r == focus);
-        if (g_minus_selects[k] != 0) SetVisible(ctx, g_minus_selects[k], r == focus);
-    }
-    if (focus != g_minus_focus) {
-        // (the frame itself is the button's own Select animation, as the game's buttons show it: lane R1 20261121-085053, the
-        // pane alone made visible drew nothing, as PaCommonBtnThin_00's FunctionalAnimSelect / UnSelect key it and
-        // no button controller plays them on the strip's copies. The focused row's Select at its last frame, the
-        // others' at its first.)
-        std::string anim_why;
-        for (int r = 0; r < kRows; ++r) {
-            const std::size_t k = static_cast<std::size_t>(r);
-            if (g_minus_buttons[k] == 0 || g_minus_layout == 0) continue;
-            char path[48];
-            std::snprintf(path, sizeof path, "Pa_CoopMinus_00/Pa_Button_%02d/Select", r);
-            if (const char* why = StopPartAnim(ctx, g_minus_layout, path, r == focus)) {
-                anim_why += std::string(anim_why.empty() ? "" : ", ") + path + " " + why;
-            }
+        if (g_minus_buttons[k] == 0) continue;
+        if (const char* why = SetFrame(ctx, g_minus_row_frames[k], r == cursor.frame_row, again)) {
+            anim_why += std::string(anim_why.empty() ? "" : ", ") + "row " + std::to_string(r) + " " + why;
         }
+    }
+    for (int i = 0; i < kLinePanes; ++i) {
+        const std::size_t k = static_cast<std::size_t>(i);
+        if (g_minus_lists[k].pane == 0) continue;
+        if (const char* why = SetFrame(ctx, g_minus_line_frames[k], i == cursor.frame_line, again)) {
+            anim_why += std::string(anim_why.empty() ? "" : ", ") + "line " + std::to_string(i) + " " + why;
+        }
+    }
+    if (moved) {
         if (!g_minus_anim_said || !anim_why.empty()) {
             g_minus_anim_said = anim_why.empty();
-            LOG_INFO(Core, "coop: pause tab: the - menu's page: the focus frames by the buttons' Select animation: {}",
+            LOG_INFO(Core, "coop: pause tab: the - menu's page: the focus frames by the Select animations: {}",
                      anim_why.empty() ? std::string("set") : anim_why);
         }
-        LOG_INFO(Core, "coop: pause tab: the - menu's page: focus on row {}", focus);
-        g_minus_focus = focus;
+        LOG_INFO(Core, "coop: pause tab: the - menu's page: the cursor on {} {}", cursor.list ? "line" : "row",
+                 cursor.list ? cursor.frame_line : cursor.frame_row);
+        g_minus_cursor = cursor, g_minus_cursor_set = true;
+    }
+    for (int i = 0; i < kLinePanes; ++i) {
+        g_minus_line_alpha[static_cast<std::size_t>(i)] = CoopPauseTab::MinusLineAlpha(i, g_minus_pickable, picked, list_now);
     }
     // (the list on the right: each line shown with its words (MinusWords set them), its value box only with a value,
     // its arrows only where Left and Right change it; the line picked bright, as the + page's list)
@@ -2431,10 +2606,10 @@ int ApplyMinusPage(void* ctx, std::uint64_t gen) {
     // (the heading's ZL and ZR icons beside it while its list has pages)
     ApplyMinusKeys(ctx, g_minus_lists[0].pane != 0 && g_minus_lines[0].paged && !g_minus_lines[0].name.empty(),
                    g_minus_line_alpha[0]);
-    // (the rows: the focused one bright, the others a little dim, all dimmed while the list has the pad)
+    // (the rows: the framed one bright, the others a little dim, all dimmed while the list has the pad)
     for (int r = 0; r < kRows; ++r) {
         const std::size_t k = static_cast<std::size_t>(r);
-        const float alpha = g_minus_rows_alpha < 1.0f ? g_minus_rows_alpha : r == focus ? 1.0f : 0.8f;
+        const float alpha = CoopPauseTab::MinusRowAlpha(cursor, r);
         if (g_minus_buttons[k] == 0 || g_minus_rows_set[k] == alpha) continue;
         CallAlpha(ctx, g_minus_buttons[k], alpha);
         g_minus_rows_set[k] = alpha;
@@ -2573,18 +2748,9 @@ void MinusWords(void* ctx, std::uint64_t layout, std::uint64_t gen, int tab) {
     g_page.SetMinusLines(pickable, raw);
     g_page.SetMinusRawBack(raw_back);
     g_page.SetMinusPageable(!mods && view == View::kLan && CellPages(BrowseListed(v.s)) > 1);
-    const bool list_now = g_page.MinusInList() || g_page.Typing() >= 0;
-    if (!raw && g_page.MinusInList()) picked = g_page.MinusLine();
-    for (int i = 0; i < kLinePanes; ++i) {
-        const std::size_t k = static_cast<std::size_t>(i);
-        g_minus_lines[k] = lines[k];
-        const bool pick = (pickable & (1u << i)) != 0;
-        g_minus_line_alpha[k] = i == 0 && !pick           ? 0.7f    // (a header, as a table's)
-                                : !pick && picked != i     ? 0.55f   // (a line of text, a heading)
-                                : !list_now || picked == i ? 1.0f
-                                                           : 0.45f;
-    }
-    g_minus_rows_alpha = list_now ? 0.45f : 1.0f;
+    for (int i = 0; i < kLinePanes; ++i) g_minus_lines[static_cast<std::size_t>(i)] = lines[static_cast<std::size_t>(i)];
+    // (the cursor's part of what was read: the frames and the alphas from it at each update, ApplyMinusPage)
+    g_minus_pickable = pickable, g_minus_words_picked = picked, g_minus_raw = raw;
     // (co-op's menu's view: its rows are the menu's pages, the cursor's row the page on the list, as on the + page)
     if (view == View::kMenu && !g_page.MinusInList()) {
         const int row = g_page.MinusRow();
@@ -2745,11 +2911,11 @@ void MinusNativeWatch(std::uint64_t now) {
 void ForgetCoopMenu(const char* why) {
     if (g_coop_screen == 0) return;
     g_coop_screen = 0, g_coop_layout = 0;
-    g_minus_page = 0, g_minus_part = 0, g_minus_buttons = {}, g_minus_cursors = {}, g_minus_selects = {};
+    g_minus_page = 0, g_minus_part = 0, g_minus_buttons = {}, g_minus_row_frames = {}, g_minus_line_frames = {};
     g_minus_hide.clear();
     for (MinusList& l : g_minus_lists) l = MinusList{};
     g_minus_keys = MinusKeys{};
-    g_minus_help = 0, g_minus_vis = -1, g_minus_page_tab = -1;
+    g_minus_help = 0, g_minus_vis = -1, g_minus_page_tab = -1, g_minus_cursor_set = false;
     g_map_hide = false, g_minus_on = false, g_coop_open_ms = 0;
     LOG_INFO(Core, "coop: pause tab: CoopMenu_00 {}: its page forgotten", why);
 }
@@ -3460,7 +3626,7 @@ void ClickLine(int line) {
     if (line < 0 || line >= static_cast<int>(lines.size()) || lines[static_cast<std::size_t>(line)].act == RowAction::kNone) return;
     {
         std::lock_guard lock(g_mutex);
-        g_page.Sound("button_decide");
+        g_page.Sound(CoopMenuNav::kSoundDecide);
     }
     Act(-1, line, true);
 }
@@ -3675,6 +3841,9 @@ void OnScreen(void* ctx, std::uint64_t screen) noexcept {
             FollowSays();   // (a Host or Join refused: why, on the Session view)
             // (after our lock: the status and the Lobby take their own; read only when the rows are due)
             if (LiveDue(gen)) LiveRows(ctx, f.layout, gen, ViewNow(ViewShown()));
+        }
+        if (f.kind == Kind::kPages && calls) {   // (the page's frames from its one cursor, every update: row 276)
+            PlusFrames(ctx, gen, now_shown && f.state <= 2);
         }
         // (the games on this network heard while their view shows; the listener closes a while after)
         if (f.kind == Kind::kPages) {
@@ -3935,7 +4104,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         case TypeKey::kCancel: menu_keys.push_back(0x1B); break;
                         case TypeKey::kOk: menu_keys.push_back(0x0D); break;
                         }
-                        g_page.Sound("button_decide");
+                        g_page.Sound(CoopMenuNav::kSoundDecide);
                     };
                     float x = 0, y = 0;
                     bool left = false;
@@ -3951,10 +4120,10 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     // (up and down: the key, round the four; Left and Right: Letter's letter, round kMenuLetters)
                     const int dr = (d & (kPadDown | kPadStickDown)) != 0 ? 1 : (d & (kPadUp | kPadStickUp)) != 0 ? -1 : 0;
                     const int dc = (d & (kPadRight | kPadStickRight)) != 0 ? 1 : (d & (kPadLeft | kPadStickLeft)) != 0 ? -1 : 0;
-                    if (dr != 0) g_menu_key = (g_menu_key + dr + kTypeKeys) % kTypeKeys, g_page.Sound("button_on");
+                    if (dr != 0) g_menu_key = (g_menu_key + dr + kTypeKeys) % kTypeKeys, g_page.Sound(CoopMenuNav::kSoundMove);
                     if (dc != 0 && g_menu_key == static_cast<int>(TypeKey::kLetter)) {
                         g_menu_letter = (g_menu_letter % nl + nl + static_cast<std::size_t>(dc + static_cast<int>(nl))) % nl;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                     if ((d & kPadA) != 0) press(g_menu_key);
                     if ((d & kPadB) != 0) menu_keys.push_back(0x1B);
@@ -4049,6 +4218,21 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                              step == CoopPauseTab::HopStep::kDone ? "arrived" : "given up", g_hop.taps, MinusCategoryNow());
                 }
             }
+            {   // (co-op's menu's own page on the - page: where a held Up or Down may still go, never round)
+                bool can_up = false, can_down = false;
+                // (not the Mods tab: its page is the Mods tab's own list, whose ends are not known here: no repeat)
+                if (g_menu_open.load() >= 0 && g_page.MinusTab() != static_cast<int>(MinusPage::kMods) &&
+                    mv.selected >= 0 && mv.selected < static_cast<int>(mv.rows.size())) {
+                    const int n = static_cast<int>(mv.rows.size());
+                    const auto pick = [&](int i) {
+                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
+                        return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
+                    };
+                    can_up = CoopMenuNav::CanStep(mv.selected, -1, n, pick);
+                    can_down = CoopMenuNav::CanStep(mv.selected, 1, n, pick);
+                }
+                g_page.SetMinusRawEnds(can_up, can_down);
+            }
             out = g_page.OnPad(in, NowMs());
             minus_tab = g_page.MinusTab();
             if (minus_tab >= 0) {
@@ -4075,7 +4259,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                          g_page.Usable(), g_pages_ok, g_mp_button, NowMs() - g_pages_seen_ms.load(),
                          g_pages_seen_state.load());
             }
-            if (b_to_rows) out |= kPadLeft, g_page.Sound("button_cancel");
+            if (b_to_rows) out |= kPadLeft, g_page.Sound(CoopMenuNav::kSoundBack);
             typing = g_page.Typing() >= 0;
             if (const int typed = g_page.TakeTyped(); typed == 2) {
                 new_password = g_page.Field(2).text();
@@ -4177,7 +4361,10 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
             // (while typing, the mouse's presses are the keyboard's: one begun on the list before it opened (Longshot's
             // A opens it at the press) is forgotten, or its release after typing was a click again, a test run's search)
             if (typing) g_cells_held = false, g_cells_press = -1, g_lines_held = false, g_lines_press = -1;
-            const std::uint64_t bdown = in & ~g_browse_last;
+            // (presses, and a held Up or Down again and again as the game's own lists (coop_menu_nav.h); `brep` the
+            // repeats alone: a list that goes round, or turns its page, does so on a fresh press only)
+            std::uint64_t brep = 0;
+            const std::uint64_t bdown = g_lists_repeat.Presses(in, NowMs(), kPadUp | kPadDown | kPadStickUp | kPadStickDown, &brep);
             g_browse_last = in;
             int cell = browse ? g_cell.load() : -1;
             const int games = g_cell_games.load();
@@ -4188,18 +4375,18 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 const int pages = CellPages(g_browse_listed.load());
                 if ((bdown & kPadY) != 0) {
                     browse_refresh = true;   // (Y: the list asked again, as the heading's Refresh box)
-                } else if (cell >= 0 && down && cell == games - 1 && pages > 1) {
+                } else if (cell >= 0 && down && cell == games - 1 && pages > 1 && (brep & (kPadDown | kPadStickDown)) == 0) {
                     g_cell_page = (g_cell_page.load() + 1) % pages, cell = 0;   // (past the page's last: the next page)
-                    g_page.Sound("button_on"), g_live_poke = true;
-                } else if (cell == 0 && up && g_cell_page.load() > 0) {
+                    g_page.Sound(CoopMenuNav::kSoundMove), g_live_poke = true;
+                } else if (cell == 0 && up && g_cell_page.load() > 0 && (brep & (kPadUp | kPadStickUp)) == 0) {
                     g_cell_page = g_cell_page.load() - 1, cell = kCells - 1;   // (above its first: the page before)
-                    g_page.Sound("button_on"), g_live_poke = true;
+                    g_page.Sound(CoopMenuNav::kSoundMove), g_live_poke = true;
                 } else if (cell < 0 && right && games > 0) {
                     cell = 0;   // (the list's first game)
-                    g_page.Sound("button_on");
+                    g_page.Sound(CoopMenuNav::kSoundMove);
                 } else if (cell >= 0 && (right || left || up || down)) {
                     const int to = CellMove(cell, right ? 1 : left ? -1 : 0, down ? 1 : up ? -1 : 0, games);
-                    if (to != cell) g_page.Sound("button_on");
+                    if (to != cell) g_page.Sound(CoopMenuNav::kSoundMove);
                     cell = to;
                 }
                 float x = 0, y = 0;
@@ -4208,13 +4395,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     const int hover = CellAt(ReadCellBoxes(), x, y);
                     const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
                     g_cells_mouse_x = x, g_cells_mouse_y = y;
-                    if (moved && hover >= 0 && hover < games && hover != cell) cell = hover, g_page.Sound("button_on");
+                    if (moved && hover >= 0 && hover < games && hover != cell) cell = hover, g_page.Sound(CoopMenuNav::kSoundMove);
                     const bool on_head = hover < 0 && LineAt(x, y) == 0;   // (the heading: its page and Refresh)
                     if (held && !g_cells_held) g_cells_press = on_head ? -2 : hover;
                     if (held && on_head) g_head_click_ms = NowMs();   // (Longshot's A for it is not the line's)
                     if (!held && g_cells_held && hover >= 0 && hover == g_cells_press && hover < games) {
                         pick_cell = hover;   // (a click on a cell: its A)
-                        g_page.Sound("button_decide");
+                        g_page.Sound(CoopMenuNav::kSoundDecide);
                     }
                     if (!held && g_cells_held && on_head && g_cells_press == -2) {
                         // (its box at the right: Refresh; its words: back a page on their left half, on on their right)
@@ -4226,7 +4413,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                         } else if (pages > 1) {
                             const int dir = x < (head.x0 + box_x) / 2 ? -1 : 1;
                             g_cell_page = CoopListPages::Step(g_cell_page.load(), pages, dir), cell = -1;
-                            g_page.Sound("button_decide"), g_live_poke = true;
+                            g_page.Sound(CoopMenuNav::kSoundDecide), g_live_poke = true;
                         }
                     }
                     g_cells_held = held;
@@ -4339,13 +4526,13 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 if (set_row < 0) {
                     if ((right || decide) && count > 0) {
                         set_row = 0, g_set_page = 0, decide = false, g_set_enter_ms = now;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                 } else {
                     if (up || down) {
                         int page = g_set_page.load(), r = set_row;
                         SettingMove(count, down ? 1 : -1, &page, &r, g_set_per_page.load());
-                        if (page != g_set_page.load() || r != set_row) g_page.Sound("button_on");
+                        if (page != g_set_page.load() || r != set_row) g_page.Sound(CoopMenuNav::kSoundMove);
                         g_set_page = page, set_row = r;
                     }
                     if (left || right) set_change = g_set_page.load() * g_set_per_page.load() + set_row, set_dir = left ? -1 : 1;
@@ -4362,7 +4549,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                     const bool moved = std::abs(x - g_cells_mouse_x) > 2 || std::abs(y - g_cells_mouse_y) > 2;
                     g_cells_mouse_x = x, g_cells_mouse_y = y;
-                    if (moved && hover >= 0 && hover != set_row) set_row = hover, g_page.Sound("button_on");
+                    if (moved && hover >= 0 && hover != set_row) set_row = hover, g_page.Sound(CoopMenuNav::kSoundMove);
                     // The mouse onto the categories while the list has the pad: the rows have it again, so the mouse's
                     // steps move their cursor (and the category with it).
                     if (moved && hover < 0 && set_row >= 0 && RowAt(ReadRowBoxes(now), x, y) >= 0) {
@@ -4382,7 +4569,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             const int dir = x < (head.x0 + head.x1) / 2 ? -1 : 1;
                             g_set_page = ((g_set_page.load() + dir) % pages + pages) % pages;
                             set_row = -1, g_live_poke = true;
-                            g_page.Sound("button_decide");
+                            g_page.Sound(CoopMenuNav::kSoundDecide);
                             LOG_INFO(Core, "coop: pause tab: settings: the header clicked: page {} of {}", g_set_page.load() + 1, pages);
                         }
                     }
@@ -4445,13 +4632,30 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     }
                 }
                 if (!list) {
-                    if (right) list = true, g_page.Sound("button_on");
+                    if (right) list = true, g_page.Sound(CoopMenuNav::kSoundMove);
                 } else {
-                    if (up) menu_events.push_back({HOS_COOP_MENU_UP, 0, 0});
-                    if (down) menu_events.push_back({HOS_COOP_MENU_DOWN, 0, 0});
+                    // (one cursor model, coop_menu_nav.h: a held Up or Down repeats but never goes round; the move
+                    // sound only when something moves: a row, or a choice that can go that way)
+                    const int n = static_cast<int>(mv.rows.size());
+                    const bool at = mv.selected >= 0 && mv.selected < n;
+                    const auto pick = [&](int i) {
+                        const auto kind = mv.rows[static_cast<std::size_t>(i)].kind;
+                        return kind != CoopPauseMenu::RowKind::kHeading && kind != CoopPauseMenu::RowKind::kNote;
+                    };
+                    const bool rep_up = (brep & (kPadUp | kPadStickUp)) != 0, rep_down = (brep & (kPadDown | kPadStickDown)) != 0;
+                    const bool go_up = up && at && (!rep_up || CoopMenuNav::CanStep(mv.selected, -1, n, pick));
+                    const bool go_down = down && at && (!rep_down || CoopMenuNav::CanStep(mv.selected, 1, n, pick));
+                    const CoopPauseMenu::Row* sel = at ? &mv.rows[static_cast<std::size_t>(mv.selected)] : nullptr;
+                    const bool sideways = sel != nullptr && !sel->fixed &&
+                                          ((sel->kind == CoopPauseMenu::RowKind::kChoice && ((left && sel->left) || (right && sel->right))) ||
+                                           (sel->kind == CoopPauseMenu::RowKind::kToggle && (left || right)));
+                    if (go_up) menu_events.push_back({HOS_COOP_MENU_UP, 0, 0});
+                    if (go_down) menu_events.push_back({HOS_COOP_MENU_DOWN, 0, 0});
                     if (left) menu_events.push_back({HOS_COOP_MENU_LEFT, 0, 0});
                     if (right) menu_events.push_back({HOS_COOP_MENU_RIGHT, 0, 0});
-                    if (up || down || left || right) g_page.Sound("button_on");
+                    const bool row_moves = (go_up && CoopMenuNav::Step(mv.selected, -1, n, true, pick) != mv.selected) ||
+                                           (go_down && CoopMenuNav::Step(mv.selected, 1, n, true, pick) != mv.selected);
+                    if (row_moves || sideways) g_page.Sound(CoopMenuNav::kSoundMove);
                 }
                 // The mouse. Longshot's mouse does not press A on the list's lines (it presses A only as a click takes
                 // its focus onto a button), so a click on a line is the module's: pressed and let go on the same line.
@@ -4469,7 +4673,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                     if (moved && pick && (!list || mrow != mv.selected)) {
                         menu_events.push_back({HOS_COOP_MENU_SELECT, mrow, 0});
                         list = true;
-                        g_page.Sound("button_on");
+                        g_page.Sound(CoopMenuNav::kSoundMove);
                     }
                     if (moved && line < 0 && list && RowAt(ReadRowBoxes(now), x, y) >= 0) list = false;   // (onto the rows)
                     if (held && !g_cells_held) {
@@ -4492,7 +4696,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                             const int dir = x < (head.x0 + head.x1) / 2 ? -1 : 1;
                             g_menu_top = std::max(0, g_menu_top.load() + dir * g_menu_per_page.load());
                             list = false;
-                            g_page.Sound("button_decide"), g_live_poke = true;
+                            g_page.Sound(CoopMenuNav::kSoundDecide), g_live_poke = true;
                         } else if (pick) {
                             const std::array<RowBox, kCells> boxes = ReadCellBoxes();
                             const RowBox b = line - 1 < kCells ? boxes[static_cast<std::size_t>(line - 1)] : LastLineBox();
@@ -4506,7 +4710,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                                 menu_events.push_back({HOS_COOP_MENU_CONFIRM, 0, 0});
                             }
                             list = true;
-                            g_page.Sound("button_decide");
+                            g_page.Sound(CoopMenuNav::kSoundDecide);
                         }
                     }
                     g_cells_held = held;
@@ -4516,7 +4720,7 @@ std::uint64_t OnPad(std::uint64_t buttons, std::int32_t stick[4]) noexcept {
                 if ((held && (g_cells_press >= 0 || g_model_dragging)) || now - g_menu_click_ms < 400) decide = false;
                 if (decide && list) {   // (the pad's A: the selected row's)
                     menu_events.push_back({HOS_COOP_MENU_CONFIRM, 0, 0});
-                    g_page.Sound("button_decide");
+                    g_page.Sound(CoopMenuNav::kSoundDecide);
                     decide = false;
                 }
                 if (list) {   // (the rows' cursor stays: left and right too, or they took it onto the list or back)

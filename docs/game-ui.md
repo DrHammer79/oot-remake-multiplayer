@@ -442,6 +442,12 @@ keyboard of its own. These layouts of `Common` can frame one (pane names, kind 1
   `SeqOneShotStartSound` (vtable `0x84be15f8`), chosen by `SeqMenuTabChangeDirectionSelector` (`0x84bef960`, slot 39
   `f_83322e90`: ToRight, ToLeft, PlusMinusChange or NoChange). (checked)
 - Still open: a cancel, close or error sound name.
+- Co-op's own lists use one cursor model, `hookshot/src/coop_menu_nav.h` (menu-polish-01113): a press moves at once, a
+  held Up or Down again after 400 ms and then every 90 ms (the typing keys' timing), never round from the last line
+  to the first while held (only a fresh press goes round, on a list that goes round), headings and notes are stepped
+  over, and the move sound plays only when something moved. Its sound names (`kSoundMove` `button_on`,
+  `kSoundDecide` `button_decide`, `kSoundBack` `button_cancel`) are the ones every page of ours plays; whether the
+  game knows `button_cancel` is still to be read in a run. (code)
 
 ## The pause menu
 
