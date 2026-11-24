@@ -33,6 +33,7 @@ enum class Kind : std::uint32_t {
 inline constexpr std::uint32_t kOwn = 1;      // asked inside one of the module's own game calls (a copy, a remove)
 inline constexpr std::uint32_t kStopped = 2;  // Create: the module had the game refuse it (a copy enemy's own shot)
 inline constexpr std::uint32_t kWithdrawn = 4;  // Refused: our replay was still waiting, withdrawn (present cleared)
+inline constexpr std::uint32_t kIdUnread = 8;   // Refused: the last hit id could not be read (taken as not reached)
 
 // Whether a create or delete the game asks for is the module's own (kOwn: a copy, a remove; never stopped): asked
 // inside one of the module's game calls, unless that call runs a copy's own game code (CoopPuppet::Call::copy_game:
@@ -239,9 +240,12 @@ public:
         }
         std::int32_t add = s->add.exchange(0, std::memory_order_acq_rel);
         bool was = s->judged.exchange(false, std::memory_order_acq_rel);
-        if (const std::int32_t tied = s->tied.exchange(0, std::memory_order_acq_rel); tied != 0) {
+        if (s->tied.load(std::memory_order_acquire) != 0) {
+            // The id first, then the amount: a Give between the two (it stores its id, then adds) leaves its id
+            // with what it added, never an amount with no id.
             const std::uint32_t id = s->tied_to.exchange(kNoHitId, std::memory_order_acq_rel);
             const bool tied_was = s->tied_judged.exchange(false, std::memory_order_acq_rel);
+            const std::int32_t tied = s->tied.exchange(0, std::memory_order_acq_rel);
             if (!HitIdReached(last_id, id)) {
                 add += tied;
                 was = was || tied_was;

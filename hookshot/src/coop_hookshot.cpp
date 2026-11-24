@@ -1570,8 +1570,11 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         // reached the replay (its damage step took it, this frame or before); read only while something waits.
         CoopActorEvents::LifeTable& table = CoopActorEvents::TheLifeTable();
         std::uint32_t last_id = CoopActorEvents::kNoHitId;
-        if (table.Pending(a) != 0) {
-            CoopRuntime::Read(a + CoopActorEvents::kLifeLastHitId, &last_id, sizeof last_id);
+        bool id_read = true;
+        if (table.Pending(a) != 0 &&
+            !CoopRuntime::Read(a + CoopActorEvents::kLifeLastHitId, &last_id, sizeof last_id)) {
+            id_read = false;
+            last_id = CoopActorEvents::kNoHitId;  // (not reached: the fall is taken, the safe side)
         }
         std::uint32_t withdraw = CoopActorEvents::kNoHitId;
         *sum = CoopActorEvents::Step(CoopActorEvents::TheRing(), table, a, own, &judged, last_id, &withdraw);
@@ -1591,7 +1594,10 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
             if (CoopActorEvents::WithdrawReplay(withdraw, record_id, present)) {
                 const std::uint32_t none = 0;
                 CoopRuntime::Write(a + CoopActorEvents::kLifeRecordPresent, &none, sizeof none);
-                e.flags = CoopActorEvents::kWithdrawn;
+                e.flags |= CoopActorEvents::kWithdrawn;
+            }
+            if (!id_read) {
+                e.flags |= CoopActorEvents::kIdUnread;
             }
             CoopActorEvents::TheRing().Push(e);
         }

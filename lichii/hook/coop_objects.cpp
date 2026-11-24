@@ -3585,11 +3585,12 @@ private:
                     const auto actor = life_components_.find(e.a);
                     const u64 address = actor != life_components_.end() ? actor->second : 0;
                     LOG_INFO(Core, "coop: hit probe: {:#x} '{}': its Life step took the fall in place of our "
-                                   "replayed hit, which {} (life flags {:#x})",
+                                   "replayed hit, which {} (life flags {:#x}{})",
                              address, NameOf(address),
                              (e.flags & CoopActorEvents::kWithdrawn) != 0 ? "still waited: withdrawn"
                                                                           : "no longer waited",
-                             e.from);
+                             e.from,
+                             (e.flags & CoopActorEvents::kIdUnread) != 0 ? ", its last hit id not read" : "");
                 }
                 break;
             default:
