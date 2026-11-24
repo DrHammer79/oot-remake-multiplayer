@@ -859,6 +859,7 @@ enum class ObjectComponent : std::uint16_t {
   hit = 21,    // protocol 14: the hit the owner's game took (ObjectHit below)
   strike = 22,  // row 230: a Redead's or Gibdo's scream that froze the owner's Link (ObjectStrike below)
   orders = 23,  // protocol 16, row 222: the battle manager's orders this enemy took (BossOrders below)
+  variants = 24,  // row 222 part 2: the variation (plug name) of the owner's boss actions (BossVariants below)
 };
 
 struct ObjectLife {
@@ -990,6 +991,34 @@ struct BossOrders {
   bool operator==(const BossOrders&) const = default;
 };
 
+// Component 24 (row 222 part 2, no protocol bump: older builds skip it by its length and keep their old
+// behaviour): the variation of the owner's boss actions. The game asks a move with an optional plug name and runs
+// the command '<verb's name>:<plug name>' (no plug: the verb's plain command), main+0xbe070: Twinrova's ranged
+// attack is plain for Fire and 'Ice', '1FeintFire', ... for the others. The bsa component (20) carries no name, so a
+// copy named its own last plug and could run another variation. One entry per action change in bsa's recent (its
+// seq), the plug name or empty for a plain ask; recent holds the newest kMaxBossVariants, oldest first; names are
+// 1 to kMaxBossVariantChars printable ASCII characters or empty.
+inline constexpr std::size_t kMaxBossVariants = 8;
+inline constexpr std::size_t kMaxBossVariantChars = 32;
+struct BossVariant {
+  std::uint32_t seq = 0;  // the action change's seq (bsa's recent)
+  std::string name;       // its plug name; empty: asked with no plug
+  // A named ask's places (row 222, diag run 20261123-160338: Twinrova's 'Ice' aims at the Link these name): bsa's
+  // action leaves them out for an ask by plug, as older copies expect. Finite; none for a plain ask (bsa has them).
+  std::array<std::optional<Vec3>, 3> places{};
+  // The ask's place kind (its request's word at 0x34; the game's default 0x10), plain or named. Row 222 (run
+  // 20261124-011531): the game keeps it with the move's places and each asking node sets its own (Twinrova's 121
+  // node 0, another of her nodes 0x10); the owner's places put in under another kind gave the copy no shot.
+  std::uint32_t kind = 0x10;
+  bool operator==(const BossVariant&) const = default;
+};
+struct BossVariants {
+  std::vector<BossVariant> recent;
+  bool operator==(const BossVariants&) const = default;
+};
+// Whether a plug name may go on the wire (empty, or 1 to kMaxBossVariantChars printable ASCII characters).
+bool ValidVariantName(std::string_view name);
+
 // The components of OBJECT_SAMPLE, OBJECT_SPAWN and HANDOVER_STATE. time is
 // always sent; the others when the sender has them. Floats must be finite.
 struct ObjectState {
@@ -1006,6 +1035,7 @@ struct ObjectState {
   std::optional<ObjectHit> hit;                     // protocol 14: the owner's newest hit taken
   std::optional<ObjectStrike> strike;               // row 230: the owner's Link frozen by its scream
   std::optional<BossOrders> orders;                 // protocol 16: its battle manager's orders (row 222)
+  std::optional<BossVariants> variants;             // row 222 part 2: its owner's action variations (no bump)
   bool operator==(const ObjectState&) const = default;
 };
 

@@ -2441,7 +2441,7 @@ public:
             TheBossMain().store(main_);
             bosses.Publish(list);
             for (const auto& [address, state] : sync_.BossVerbsIn()) {
-                bosses.Receive(address, state);
+                bosses.Receive(address, state, sync_.BossVariantsIn(address));  // (row 222 part 2: its variations)
             }
             for (const std::string& note : bosses.TakeNotes()) {
                 LOG_INFO(Core, "coop: bosses: {}", note);
@@ -4720,7 +4720,7 @@ private:
                         s.bsa_component = r.Ptr(*table + CoopBossNative::addr::kComponentBsa).value_or(0);
                     }
                     if (s.bsa_component != 0) {
-                        s.bsa = CoopBossNative::TheTable().OwnerState(a);
+                        s.bsa = CoopBossNative::TheTable().OwnerState(a, &s.variants);
                         if (own_hit_life) {
                             (void)NewOwnHitAt(r, a, *own_hit_life, s.position, own_hit_took_life);
                         }  // our own hit: its own reaction runs (NoteOwnHit) unless it took life (NoteOwnDamage)
@@ -4759,7 +4759,7 @@ private:
                     if (const auto table = r.Ptr(a + kActorComponents)) {
                         s.bsa_component = r.Ptr(*table + CoopBossNative::addr::kComponentBsa).value_or(0);
                     }
-                    s.bsa = CoopBossNative::TheTable().OwnerState(a);
+                    s.bsa = CoopBossNative::TheTable().OwnerState(a, &s.variants);
                     s.orders = CoopBossOrders::TheTable().OwnerOrders(a);  // row 222: its manager's orders, ours
                     if (own_hit_life) {
                         s.hit_at = NewOwnHitAt(r, a, *own_hit_life, s.position, own_hit_took_life);
