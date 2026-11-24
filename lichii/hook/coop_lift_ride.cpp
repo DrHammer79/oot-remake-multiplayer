@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 #include "coop_fairy.h"
 #include "coop_room_objects.h"
@@ -19,20 +20,35 @@ bool IsRideLift(std::string_view name) {
     return name.find("ElevatorLift_") != std::string_view::npos || name.find("MoveFloor_") != std::string_view::npos;
 }
 
-std::vector<std::uint64_t> Ridden(const std::vector<Lift>& lifts, const std::vector<coop::protocol::Vec3>& others) {
+namespace {
+std::vector<std::uint64_t> On(const std::vector<Lift>& lifts, const std::vector<coop::protocol::Vec3>& others,
+                              float radius, float below, float above) {
     std::vector<std::uint64_t> out;
     for (const Lift& l : lifts) {
         for (const auto& p : others) {
             const float dx = p[0] - l.position[0];
             const float dz = p[2] - l.position[2];
             const float dy = p[1] - l.position[1];
-            if (dx * dx + dz * dz <= kRideRadiusM * kRideRadiusM && dy >= -kRideBelowM && dy <= kRideAboveM) {
+            if (dx * dx + dz * dz <= radius * radius && dy >= -below && dy <= above) {
                 out.push_back(l.address);
                 break;
             }
         }
     }
     return out;
+}
+}  // namespace
+
+std::vector<std::uint64_t> Ridden(const std::vector<Lift>& lifts, const std::vector<coop::protocol::Vec3>& others) {
+    return On(lifts, others, kRideRadiusM, kRideBelowM, kRideAboveM);
+}
+
+bool IsStandSwitch(std::string_view name) {
+    return name.starts_with("Obj_") && name.find("StepSwitch_") != std::string_view::npos;
+}
+
+std::vector<std::uint64_t> Stood(const std::vector<Lift>& switches, const std::vector<coop::protocol::Vec3>& others) {
+    return On(switches, others, kStandRadiusM, kStandBelowM, kStandAboveM);
 }
 
 void Rider::Want(const std::vector<std::uint64_t>& lifts, std::uint64_t main, std::uint64_t now_ms) {
@@ -71,7 +87,7 @@ std::optional<CoopPuppet::Call> Rider::Step(CoopPuppet::Guest& guest, bool after
             asked_malloc_ = false;
             if (result == 0) {
                 failed_ = true;
-                notes_.push_back("lift ride: the game's malloc gave nothing; lift rides off");
+                notes_.push_back(what_ + ": the game's malloc gave nothing; off");
                 return std::nullopt;
             }
             block_ = result;
@@ -101,19 +117,18 @@ std::optional<CoopPuppet::Call> Rider::Next(CoopPuppet::Guest& guest, std::uint6
         frame_.pop_front();
         if (!CoopFairy::ActorPresent(guest, lift)) continue;
         // The execute reads [actor+0x270] without a check: only a lift whose logic has a live bool RideOnPlayer.
-        const auto plug = CoopLogicSet::BoolPlug(guest, lift, kRideOnPlayer);
+        const auto plug = CoopLogicSet::BoolPlug(guest, lift, key_);
         if (!plug) continue;
         if (plug->value == std::uint8_t{1}) continue;  // on already (our Link, or set this frame)
-        if (!CoopLogicSet::WriteNode(guest, block_, main, lift, kRideOnPlayer)) continue;
+        if (!CoopLogicSet::WriteNode(guest, block_, main, lift, key_)) continue;
         {
             std::lock_guard lock(mutex_);
             if (std::find(told_.begin(), told_.end(), lift) == told_.end()) {
                 told_.push_back(lift);
-                char line[160];
+                char line[200];
                 std::snprintf(line, sizeof line,
-                              "lift ride: another player is on our lift 0x%llx: its RideOnPlayer set through the "
-                              "game's set-bool",
-                              static_cast<unsigned long long>(lift));
+                              "%s: another player is on our 0x%llx: its plug %08x set through the game's set-bool",
+                              what_.c_str(), static_cast<unsigned long long>(lift), key_);
                 notes_.emplace_back(line);
             }
         }
@@ -125,6 +140,14 @@ std::optional<CoopPuppet::Call> Rider::Next(CoopPuppet::Guest& guest, std::uint6
 Rider& TheRider() {
     static Rider rider;
     return rider;
+}
+
+Rider& TheStander() {
+    static Rider stander([] {
+        const char* v = std::getenv("LICHII_COOP_SWITCH_STAND");
+        return v != nullptr && std::string_view(v) == "onstate" ? kStepOnState : kStepContact;
+    }(), "switch stand");
+    return stander;
 }
 
 }  // namespace CoopLiftRide
