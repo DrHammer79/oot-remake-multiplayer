@@ -720,7 +720,7 @@ TEST_CASE("hookshot: the camera wake (patch 0043) asks the module with state -1 
     CHECK(patch.find("+    if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == 2 && coop_turn_fn) hos_coop_camera_wake();") !=
           std::string::npos);
     CHECK(patch.find("+    if (hos_coop_turn_filter(NULL, NULL, -1) != 1) return;") != std::string::npos);
-    CHECK(patch.find("+    if (*skip & NODE_SKIP_UPDATE) _InterlockedAnd8(skip, (char)~NODE_SKIP_UPDATE);") != std::string::npos);
+    CHECK(patch.find("+    if (*skip & NODE_SKIP_UPDATE) __atomic_fetch_and(skip, (char)~NODE_SKIP_UPDATE, __ATOMIC_SEQ_CST);") != std::string::npos);
     CHECK(patch.find("+#define WAKE_AFTER_NS 50000000LL") != std::string::npos);
     for (std::size_t at = patch.find("diff --git a/"); at != std::string::npos; at = patch.find("diff --git a/", at + 1)) {
         bool allowed = false;
