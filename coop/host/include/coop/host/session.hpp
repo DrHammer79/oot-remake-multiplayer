@@ -239,6 +239,21 @@ class Session {
     watcher_->guard_count(count, sources);
     return true;
   }
+  // Emulator thread only: FlagWatcher::guard_reward (row 272, a once-per-save
+  // reward got in two games at once). False when flags are not shared.
+  bool guard_reward(std::span<const std::vector<FlagKey>> units, std::span<const FlagKey> sources) {
+    if (!watcher_) return false;
+    watcher_->guard_reward(units, sources);
+    return true;
+  }
+  // Emulator thread only: FlagWatcher::set_reward_self (row 272).
+  void set_reward_self(std::uint8_t number) {
+    if (watcher_) watcher_->set_reward_self(number);
+  }
+  // Emulator thread only: FlagWatcher::take_rewards_guarded.
+  std::vector<FlagWatcher::RewardGuarded> take_rewards_guarded() {
+    return watcher_ ? watcher_->take_rewards_guarded() : std::vector<FlagWatcher::RewardGuarded>{};
+  }
   // Emulator thread only: FlagWatcher::expect_doubled_gain (issue 195, a
   // chest opened again here). False when flags are not shared.
   bool expect_doubled_gain() {

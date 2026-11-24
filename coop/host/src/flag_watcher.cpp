@@ -201,6 +201,164 @@ void FlagWatcher::guard_count(FlagKey count, std::span<const FlagKey> sources) {
   }
 }
 
+void FlagWatcher::guard_reward(std::span<const std::vector<FlagKey>> units, std::span<const FlagKey> sources) {
+  const std::size_t g = reward_guards_.size();
+  RewardGuard& guard = reward_guards_.emplace_back();
+  for (const std::vector<FlagKey>& keys : units) {
+    if (keys.empty()) continue;
+    const std::size_t u = guard.units.size();
+    guard.units.push_back(keys);
+    guard.got.push_back(false);
+    for (const FlagKey key : keys) reward_key_[key] = RewardUnit{g, u, 0, false};
+  }
+  for (const FlagKey source : sources) {
+    share_pickup_named(source);
+    reward_source_[source] = {g, guard.sources.size()};
+    guard.sources.push_back(source);
+    guard.source_on.push_back(false);
+  }
+}
+
+void FlagWatcher::prune_reward(RewardGuard& guard) const {
+  while (!guard.events.empty() && frames_ > kRewardFrames && guard.events.front().at < frames_ - kRewardFrames) {
+    guard.events.pop_front();
+  }
+}
+
+void FlagWatcher::note_reward_received(FlagStore&, const FlagEntry& entry) {
+  const FlagKey key = key_of(entry);
+  if (!reward_source_.contains(key) && !reward_key_.contains(key)) return;
+  if (received_kind_ != ReceivedKind::live) reward_quiet_ = true;  // a join or a reset: no reward given now
+  if (reward_self_ != 0 && from_ == reward_self_) return;  // the host's answer to our own write: counted as ours
+  reward_received_[key] = from_;  // who made it (FLAG_ORIGIN's asker, else the sender)
+}
+
+bool FlagWatcher::reward_twice(RewardGuard& guard) const {
+  // Each sender's units count only up to that sender's own Bools of this family: a gain with no reward of its
+  // sender (a shop's bottle, a randomizer chest's, a scrub's bag) never uses another reward's allowance.
+  std::set<FlagKey> allowed;
+  std::map<std::uint8_t, std::set<FlagKey>> bools;
+  std::map<std::uint8_t, std::size_t> gains;
+  for (const RewardEvent& e : guard.events) {
+    if (e.gain) {
+      ++gains[e.sender];
+    } else {
+      allowed.insert(e.source);
+      bools[e.sender].insert(e.source);
+    }
+  }
+  std::size_t used = 0;
+  std::size_t others = 0;
+  for (const auto& [sender, n] : gains) {
+    const auto b = bools.find(sender);
+    const std::size_t paired = (std::min)(n, b != bools.end() ? b->second.size() : std::size_t{0});
+    used += paired;
+    if (sender != kRewardSelf) others += paired;
+  }
+  // Ours is the same reward twice when another player's copy of one of the Bools on now came, and every Bool
+  // on now is used up.
+  return others > 0 && used >= allowed.size();
+}
+
+void FlagWatcher::judge_rewards() {
+  const bool quiet = std::exchange(reward_quiet_, false);
+  const std::map<FlagKey, std::uint8_t> received = std::exchange(reward_received_, {});
+  const auto seen = [&](FlagKey k) -> std::optional<std::uint32_t> {
+    const auto it = last_.find(k);
+    if (it == last_.end()) return std::nullopt;
+    return it->second.value;
+  };
+  for (RewardGuard& guard : reward_guards_) {
+    prune_reward(guard);
+    if (!guard.ready) {
+      // The baseline: every key read once. What the save holds then is no reward given now.
+      bool all = true;
+      for (const FlagKey s : guard.sources) all = all && seen(s).has_value();
+      for (const auto& unit : guard.units) {
+        for (const FlagKey k : unit) all = all && seen(k).has_value();
+      }
+      if (!all) continue;
+      guard.ready = true;
+    }
+    // Each source and each unit as a whole, after every write of this frame landed: the keys' order in the
+    // messages, and how many messages they came in, do not matter.
+    for (std::size_t i = 0; i < guard.sources.size(); ++i) {
+      const bool on = seen(guard.sources[i]).value_or(0) != 0;
+      const auto r = received.find(guard.sources[i]);
+      // Another player's flow gave it: counted even when ours had set it already (both past their checks).
+      if (on && r != received.end() && !quiet) guard.events.push_back({frames_, r->second, false, guard.sources[i]});
+      guard.source_on[i] = on;
+    }
+    for (std::size_t u = 0; u < guard.units.size(); ++u) {
+      bool got = false;
+      std::optional<std::uint8_t> sender;
+      for (const FlagKey k : guard.units[u]) {
+        got = got || seen(k).value_or(0) != 0;
+        if (const auto r = received.find(k); r != received.end()) sender = r->second;
+      }
+      if (got && !guard.got[u] && sender && !quiet) {
+        guard.events.push_back({frames_, *sender, true, FlagKey{}});  // another player's copy came
+      }
+      guard.got[u] = got;
+    }
+  }
+}
+
+bool FlagWatcher::reward_put_back(FlagStore& store, FlagKey key, const FlagEntry& before, const FlagEntry& now) {
+  if (const auto source = reward_source_.find(key); source != reward_source_.end()) {
+    RewardGuard& guard = reward_guards_[source->second.first];
+    if (guard.ready && before.value == 0 && now.value != 0 && !guard.source_on[source->second.second]) {
+      guard.events.push_back({frames_, kRewardSelf, false, key});  // our own flow gave it
+    }
+    guard.source_on[source->second.second] = now.value != 0;
+    return false;
+  }
+  const auto found = reward_key_.find(key);
+  if (found == reward_key_.end()) return false;
+  RewardUnit& u = found->second;
+  RewardGuard& guard = reward_guards_[u.guard];
+  if (!guard.ready) return false;
+  bool put_back = false;
+  if (u.pass == diff_pass_) {
+    put_back = u.put_back;  // this pass decided for the unit already (its other key)
+  } else if (before.value == 0 && now.value != 0 && !guard.got[u.unit]) {
+    // Our own flow's source set in this same scan, read later in it: counted first.
+    for (std::size_t i = 0; i < guard.sources.size(); ++i) {
+      if (guard.source_on[i]) continue;
+      const std::optional<FlagEntry> v = store.read(guard.sources[i]);
+      if (v && v->value != 0) {
+        guard.source_on[i] = true;
+        guard.events.push_back({frames_, kRewardSelf, false, guard.sources[i]});
+      }
+    }
+    prune_reward(guard);
+    put_back = reward_twice(guard);
+    if (!put_back) {
+      guard.events.push_back({frames_, kRewardSelf, true, FlagKey{}});
+      guard.got[u.unit] = true;
+    }
+    for (const FlagKey k : guard.units[u.unit]) {
+      RewardUnit& other = reward_key_[k];
+      other.pass = diff_pass_;
+      other.put_back = put_back;
+    }
+    if (put_back) {
+      ++stats_.rewards_guarded;
+      rewards_guarded_.push_back(RewardGuarded{guard.units[u.unit].front()});
+    }
+  }
+  if (!put_back || now.value == 0) return false;
+  FlagEntry back = before;
+  back.key = key;
+  if (!store.write_exact(back)) {  // exact: OR and max would keep ours
+    note_write_failure(store, key, "reward put back");
+    return false;  // sent as any gain: the share keeps it, as before row 272
+  }
+  ++stats_.applied;
+  pending_.erase(key);
+  return true;
+}
+
 void FlagWatcher::expect_doubled_gain() {
   if (doubled_ == 0 || frames_ > doubled_until_) doubled_ = 0;
   doubled_ = std::min(doubled_ + 1, kMaxDoubledGains);
@@ -214,6 +372,7 @@ bool FlagWatcher::share_pickup_named(FlagKey key) {
 }
 
 void FlagWatcher::note_for_others(FlagStore& store, const FlagEntry& entry) {
+  note_reward_received(store, entry);  // row 272
   const FlagKey key = key_of(entry);
   const bool noted = key.kind == FlagKeyKind::key64 || pickups_.contains(key);
   if (!noted || entry.kind != protocol::FlagKind::boolean || entry.value == 0) return;
@@ -309,6 +468,9 @@ void FlagWatcher::reset() {
     g.credit = 0;
     g.others_at = 0;
     g.put_back = 0;
+  }
+  for (RewardGuard& g : reward_guards_) {  // row 272: a reward given now belongs to the old session
+    g.events.clear();
   }
   raced_.clear();
   resend_pending_ = role_ == FlagRole::player && !pending_.empty();
@@ -453,6 +615,7 @@ std::vector<Outgoing> FlagWatcher::frame(FlagStore& store) {
       changes = pending_;
       resend_pending_ = false;
     }
+    judge_rewards();  // row 272: what other players' writes of this frame gave, before our own changes
     diff(store, changes);
     age_reset_holds(store, static_cast<std::uint32_t>(step));
     age_cap_holds(store, static_cast<std::uint32_t>(step));
@@ -1246,6 +1409,11 @@ void FlagWatcher::diff(FlagStore& store, Table& changes) {
     }
     const FlagEntry before = it->second;
     it->second = *now;
+    if (!restate_.contains(key) && reward_put_back(store, key, before, *now)) {
+      it->second = before;  // row 272: the same reward twice, put back, never sent
+      it->second.key = key;
+      continue;
+    }
     // Not while loading: a load putting the save's 0 back is the load
     // revert's (below, the group's value), not a drop of the game's own.
     // A one-way UInt (a dungeon's floors, ItemRule::bits) loses no bit: the

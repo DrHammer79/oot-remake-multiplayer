@@ -776,6 +776,14 @@ public:
             session_->guard_count(coop::protocol::FlagKey(coop::host::kGoldTokenCount, std::uint16_t{0}),
                                   skulltulas);
         }
+        if (sharing_) {  // row 272: once-per-save rewards (bottles, upgrades) given once for the group
+            for (const auto family : coop::host::rewards::kFamilies) {  // each family on its own
+                session_->guard_reward(coop::host::rewards::units(family), coop::host::rewards::sources(family));
+            }
+            for (const auto& r : coop::host::rewards::kOther) {
+                session_->share_pickup_named(coop::protocol::FlagKey(r.hash, std::uint16_t{0}));
+            }
+        }
         // Row 218: heart containers add up across players as heart pieces do (FlagWatcher::share_containers).
         session_->share_containers(coop::protocol::FlagKey{0xfbe01da1u, 0});
         thread_ = std::thread([this] { Run(); });
@@ -1495,6 +1503,21 @@ public:
                      "coop: flags: count {:#010x} +{} here was a pickup another player had taken: "
                      "put back, not sent",
                      g.count.hash, g.amount);
+        }
+        if (sharing_) {  // row 272: our number, so the host's answer to our own reward Bool counts as ours
+            std::uint8_t self = 0;
+            session_->with_client([&](coop::net::Client& c) {
+                self = c.player_number();
+                return 0;
+            });
+            session_->set_reward_self(self);
+        }
+        for (const auto& g : session_->take_rewards_guarded()) {  // row 272 (docs/items.md)
+            const auto* item = coop::host::find_item(g.key.hash);
+            LOG_INFO(Core,
+                     "coop: flags: reward {} ({:#010x}) got here while another player's copy of the same reward "
+                     "had come: put back, not sent (row 272)",
+                     item != nullptr ? item->name : std::string_view("?"), g.key.hash);
         }
         {  // issue 195: a chest another player had opened, opened again here
             const bool in_event = OurLinkInEvent(reading);  // G1: our Link's get scene, not another player's event here
