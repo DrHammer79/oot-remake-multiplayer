@@ -119,6 +119,8 @@ Dungeon state is in named flags that the room logic reads ([dungeon.md](dungeon.
 
 Position, life (except the max), magic, rupee count, what is in the hands and on the buttons, bottles' contents, equipped gear, the camera, Navi's hints, "in battle", the Lens of Truth, which room a player is in, one-way rides. Minigames played alone: the Scrub Brothers' order (issue 149) and the fishing pond (issue 151: the owner, the rod, the catch record `MiniGame_Fishing_RecordFishSize_Child`/`_Adult` and the tutorial flags); only their prizes are shared (the pond's fish and the cast lures are shared since fishing-2, items.md). These rows must stay per player; a fix must not share them. Character Select voices: each PC builds them from its own game ([puppet.md](puppet.md)); only the pick is shared, through the look.
 
+**Race mode** (a host setting, [world.md](world.md) "Race mode"): every row above but the players' own (puppets, looks, chat, voice, PvP, down but not out) is not shared, on both sides and at the server (`coop::protocol::race_private`). A new row that shares the world adds its messages there.
+
 ## P1 list
 
 The P1 rows above, grouped by the fix branch that should take them:

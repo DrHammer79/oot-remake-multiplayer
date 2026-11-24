@@ -383,6 +383,7 @@ Options Options::Read(std::string_view coop_ini, std::string_view options_ini) {
     o.pvp = On(IniGet(options_ini, "pvp"));
     o.approve_joins = On(IniGet(options_ini, "approve_joins"));
     o.gold_own = IniGet(options_ini, "gold_skulltulas").value_or("") == "own";
+    o.race = On(IniGet(options_ini, "race"));
     // The password on this network (row 251, dauro 2026-11-22: LAN joins need none): not needed unless the kit's
     // documented line says so (same_network_password = on, as Host.bat reads it) or an older build's line was
     // hand-set to off (same_network_open = off). The host still lets only a private source address in that way.
@@ -482,6 +483,7 @@ void Options::Write(std::string& coop_ini, std::string& options_ini) const {
         o = approve_joins ? IniSet(o, "approve_joins", "on", true) : IniUnset(o, "approve_joins");
     }
     o = gold_own ? IniSet(o, "gold_skulltulas", "own", true) : IniUnset(o, "gold_skulltulas");
+    o = race ? IniSet(o, "race", "on", true) : IniUnset(o, "race");
     o = auto_rejoin ? IniSet(o, "auto_rejoin", "on", true) : IniUnset(o, "auto_rejoin");
     o = original_game ? IniSet(o, "original_game", "on", true) : IniUnset(o, "original_game");
     // (one line for it, the kit's own: same_network_password = on while this network needs the password; the older

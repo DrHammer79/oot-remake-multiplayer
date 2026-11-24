@@ -5580,6 +5580,53 @@ TEST_CASE("mods: each player's list is passed on and given to joiners, and share
   CHECK(messages_to<ModSettings>(h, 5).empty());
 }
 
+// Race mode (coop/protocol/race.hpp): the world stays in each game. 3 players, one joining mid-game.
+TEST_CASE("race mode: no flag is relayed, kept or given to a joiner, chat still goes, on until the session empties") {
+  Harness h;
+  h.join(1, "Link");
+  h.join(2, "Zelda");
+  h.join(3, "Saria");
+  h.receive(1, FlagState{0, {flag(1, 1)}}, kChannelProgress);  // before race mode: kept by the server
+  h.receive(1, ModSettings{0, {{"coop", "race", "on"}}}, kChannelSession);
+  h.clear();
+
+  h.receive(2, FlagSet{0, {flag(2, 1)}}, kChannelProgress);
+  h.receive(1, FlagState{0, {flag(3, 1)}}, kChannelProgress);
+  h.receive(1, FlagSnapshot{0, 1, {flag(4, 1)}}, kChannelProgress);
+  h.receive(3, Chat{0, "go"}, kChannelSession);
+  for (ConnectionId id : {1u, 2u, 3u}) {
+    CHECK(messages_of<FlagSet>(h, id).empty());
+    CHECK(messages_of<FlagState>(h, id).empty());
+    CHECK(messages_of<FlagSnapshot>(h, id).empty());
+    CHECK(messages_of<FlagOrigin>(h, id).empty());
+  }
+  CHECK(messages_of<Chat>(h, 1).size() == 1);
+  CHECK(messages_of<Chat>(h, 2).size() == 1);
+  CHECK(h.session.stats().race_dropped == 3);
+
+  // A joiner mid-game: the host's settings (race on), and no table, kept before or not.
+  h.clear();
+  h.join(4, "Ruto");
+  CHECK(messages_of<FlagSnapshot>(h, 4).empty());
+  CHECK(messages_of<FlagState>(h, 4).empty());
+  CHECK(messages_of<ModSettings>(h, 4) == std::vector<ModSettings>{ModSettings{1, {{"coop", "race", "on"}}}});
+
+  // The host says off mid-session: nothing comes back until the session ends (no push, no pull).
+  h.receive(1, ModSettings{0, {{"coop", "race", "off"}}}, kChannelSession);
+  h.clear();
+  h.receive(2, FlagSet{0, {flag(5, 1)}}, kChannelProgress);
+  CHECK(messages_of<FlagSet>(h, 1).empty());
+
+  // Everyone leaves: the next session shares again.
+  for (ConnectionId id : {1u, 2u, 3u, 4u}) h.session.disconnected(id, h.now);
+  h.collect();
+  h.join(5, "Nabooru");
+  h.join(6, "Impa");
+  h.clear();
+  h.receive(6, FlagSet{0, {flag(6, 1)}}, kChannelProgress);
+  CHECK(messages_of<FlagSet>(h, 5).size() == 1);
+}
+
 // Issue 151 (fishing-3): a fish goes to the game whose lure is nearest it.
 namespace {
 FishLure lure_at(std::uint16_t cm, std::uint8_t flags = 0) {

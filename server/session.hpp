@@ -433,6 +433,7 @@ struct Stats {
   std::uint64_t dbno_revives_dropped = 0;  // mode off, to nobody, or to themselves
   std::uint64_t difficulty_refused = 0;  // DIFFICULTY from a player who does not host
   std::uint64_t mod_settings_refused = 0;  // MOD_SETTINGS from a player who does not host
+  std::uint64_t race_dropped = 0;          // race mode: world messages neither relayed nor sent
   // The Lobby (docs/protocol.md "Lobby"): the host's kicks, bans and mutes.
   std::uint64_t lobby_done = 0;      // LOBBY_ACTIONs carried out
   std::uint64_t lobby_refused = 0;   // LOBBY_ACTION from a player who does not host
@@ -1167,6 +1168,7 @@ class Session {
   std::uint8_t free_number(std::uint8_t preferred = 0) const;
   std::uint8_t max_players() const;  // config_.max_players, 1 to kMaxPlayers
 
+  bool race_held(const protocol::Message& m);  // race mode drops it (counted)
   void send(ConnectionId to, std::uint8_t channel, const protocol::Message& m);
   void send_to_others(ConnectionId except, std::uint8_t channel,
                       const protocol::Message& m);
@@ -1232,6 +1234,7 @@ class Session {
   // host leaves until the new host sends its own; forgotten when the session
   // empties.
   std::optional<protocol::ModSettings> mod_settings_;
+  bool race_ = false;  // race mode (coop/protocol/race.hpp): on until the session empties
   // Every shared flag value the host has sent, by key. Kept when
   // the host leaves; forgotten when the session empties.
   std::map<protocol::FlagKey, protocol::FlagEntry> flags_;

@@ -665,7 +665,7 @@ TEST_CASE("pause tab: Settings: name, Link's look, players and voice chat (off u
     m.Open(Page::kSettings);
     CHECK(Names(m) == std::vector<std::string>{"Your name", "Link's look", "Players when you host",
                                                "Port when you host", "Relay", "Room name", "List my room", "Auto-rejoin",
-                                               "Password on this network", "Game", "Approve joins", "Gold Skulltulas", "PvP",
+                                               "Password on this network", "Game", "Approve joins", "Gold Skulltulas", "Race mode", "PvP",
                                                "Down but not out", "Difficulty",
                                                "Proximity voice chat", "Chat key", "Show players on map", "Names on map", "New Game+",
                                                "Saves", "Original game"});   // (no patch 0015: no input rows)
@@ -681,10 +681,11 @@ TEST_CASE("pause tab: Settings: name, Link's look, players and voice chat (off u
     CHECK(v.rows[9].value == "Private game");   // (the host rows: what the next Host uses)
     CHECK_FALSE(v.rows[10].on);   // (Approve joins: off unless turned on)
     CHECK(v.rows[11].value == "Shared");   // (Gold Skulltulas: shared unless chosen)
-    CHECK_FALSE(v.rows[12].on);   // (PvP too)
-    CHECK(v.rows[13].fixed);      // (Down but not out: the session's, so not in one it waits, dimmed)
-    CHECK(v.rows[15].kind == RowKind::kToggle);
-    CHECK_FALSE(v.rows[15].on);   // the default
+    CHECK_FALSE(v.rows[12].on);   // (Race mode: off unless chosen)
+    CHECK_FALSE(v.rows[13].on);   // (PvP too)
+    CHECK(v.rows[14].fixed);      // (Down but not out: the session's, so not in one it waits, dimmed)
+    CHECK(v.rows[16].kind == RowKind::kToggle);
+    CHECK_FALSE(v.rows[16].on);   // the default
     // the name, typed
     m.Press(Input::kDecide);
     CHECK(m.typing());
@@ -756,10 +757,10 @@ TEST_CASE("pause tab: Settings: players on the map and their names, on unless tu
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
     View v = m.view();
-    REQUIRE(v.rows.size() == 22);   // (the port, relay, room, network password, host rows and chat key rows before them, New Game+, Saves and Original game after)
-    CHECK(v.rows[17].kind == RowKind::kToggle);
-    CHECK(v.rows[17].on);
+    REQUIRE(v.rows.size() == 23);   // (the port, relay, room, network password, host rows and chat key rows before them, New Game+, Saves and Original game after)
+    CHECK(v.rows[18].kind == RowKind::kToggle);
     CHECK(v.rows[18].on);
+    CHECK(v.rows[19].on);
     SelectRow(m, "Show players on map");
     m.Press(Input::kLeft);
     CHECK_FALSE(m.options().map_players);
@@ -834,11 +835,11 @@ TEST_CASE("pause tab: the mouse selects a row and clicks a value's halves") {
     Menu m;
     m.Show(CoopTitleMenu::Options{});
     m.Open(Page::kSettings);
-    m.Select(15);
+    m.Select(16);
     CHECK(Selected(m) == "Proximity voice chat");
-    m.Click(15, 1);   // the On half
+    m.Click(16, 1);   // the On half
     CHECK(m.options().voice);
-    m.Click(15, -1);
+    m.Click(16, -1);
     CHECK_FALSE(m.options().voice);
     m.Click(14, 0);   // the name: selected only
     CHECK_FALSE(m.options().voice);
@@ -928,7 +929,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(Selected(m) == "Chat key");   // (the rows came under it: the same row stays chosen)
     CHECK(Names(m) == std::vector<std::string>{"Your name", "Link's look", "Players when you host",
                                                "Port when you host", "Relay", "Room name", "List my room", "Auto-rejoin",
-                                               "Password on this network", "Game", "Approve joins", "Gold Skulltulas", "PvP",
+                                               "Password on this network", "Game", "Approve joins", "Gold Skulltulas", "Race mode", "PvP",
                                                "Down but not out", "Difficulty",
                                                "Proximity voice chat", "Chat key", "Controller",
                                                "Keyboard and mouse", "Show players on map", "Names on map",
@@ -957,7 +958,7 @@ TEST_CASE("pause tab: Settings: Controller and Keyboard rows when this Hookshot 
     CHECK(r->kind == Request::Kind::kKeyboard);
     // gone again (the module found no patch 0015): the selection stays on a row there is
     m.SetInputRows({}, {});
-    CHECK(Names(m).size() == 22);   // (with the port, the relay and room rows, the network password, the host rows, two map rows, New Game+, Saves and Original game)
+    CHECK(Names(m).size() == 23);   // (with the port, the relay and room rows, the network password, the host rows, two map rows, New Game+, Saves and Original game)
     CHECK_FALSE(Selected(m).empty());
 }
 

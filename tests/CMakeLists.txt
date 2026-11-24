@@ -18,6 +18,7 @@ add_executable(coop_tests
   protocol/fuzz_test.cpp
   protocol/join_password_test.cpp
   protocol/official_mark_test.cpp
+  protocol/race_test.cpp
   protocol/traffic_crypto_test.cpp
   net/clock_test.cpp
   net/client_test.cpp
@@ -188,6 +189,7 @@ add_executable(coop_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_difficulty.cpp
   lichii/mod_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_mod_share.cpp
   lichii/gold_mode_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_gold_mode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_race_mode.cpp
   lichii/pack_notice_test.cpp
   lichii/name_privacy_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_name_privacy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_time_sync.cpp

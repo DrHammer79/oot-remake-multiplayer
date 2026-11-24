@@ -1,6 +1,7 @@
 #include "session.hpp"
 
 #include "coop/protocol/animation_words.hpp"
+#include "coop/protocol/race.hpp"
 #include "coop/protocol/scene_place.hpp"
 
 #include <algorithm>
@@ -732,6 +733,10 @@ void Session::dispatch_player_message(ConnectionId id, Connection& c, std::uint8
     ++stats_.repeated_hello;
     return;
   }
+  if (race_ && race_private(message)) {  // race mode: the world stays in each game, neither kept nor relayed
+    ++stats_.race_dropped;
+    return;
+  }
   if (std::holds_alternative<LocalJoin>(message) || std::holds_alternative<LocalLeave>(message) ||
       std::holds_alternative<LocalSample>(message) || std::holds_alternative<LocalMessage>(message)) {
     on_local(id, c, message, now_us);
@@ -1070,6 +1075,12 @@ void Session::on_mods(ConnectionId id, Connection& c, Message& message) {
     log("player " + std::to_string(c.number) + " runs " + std::to_string(list->mods.size()) + " shared mods");
   } else {
     mod_settings_ = std::get<ModSettings>(message);
+    // Race mode: on from the host's first "on" until the session empties. An "off" later does not bring
+    // sharing back: what each game did alone is never pushed or pulled (docs/world.md, "Race mode").
+    if (race_of(mod_settings_->settings).value_or(false) && !race_) {
+      race_ = true;
+      log("race mode on: the world stays in each game");
+    }
   }
   send_to_others(id, kChannelSession, message);
   ++stats_.relayed;
@@ -3264,6 +3275,7 @@ void Session::on_voice(ConnectionId id, const Connection& c, VoiceFrame& m,
 
 void Session::send_to_place(const std::string& scene, std::optional<ConnectionId> except,
                             std::uint8_t channel, const Message& m) {
+  if (race_held(m)) return;
   std::vector<std::uint8_t> bytes;
   if (encode(m, bytes) != Error::none) return;
   for (const auto& [id, c] : connections_) {
@@ -3275,6 +3287,7 @@ void Session::send_to_place(const std::string& scene, std::optional<ConnectionId
 
 void Session::send_to_scene(const std::string& scene, std::optional<ConnectionId> except,
                             std::uint8_t channel, const Message& m) {
+  if (race_held(m)) return;
   std::vector<std::uint8_t> bytes;
   if (encode(m, bytes) != Error::none) return;
   for (const auto& [id, c] : connections_) {
@@ -3650,6 +3663,7 @@ void Session::remove_player(ConnectionId id, LeaveReason reason, std::uint64_t n
     difficulty_set_by_ = 0;
     difficulty_told_ = {};
     mod_settings_.reset();
+    race_ = false;
     lobby_mutes_.clear();
     banned_ids_.clear();
     for (const std::string& id : config_.kept_bans) {   // (the host's kept bans stay: SessionConfig::kept_bans)
@@ -3945,13 +3959,21 @@ std::uint8_t Session::free_number(std::uint8_t preferred) const {
   return 0;  // unreachable: on_hello refuses a full session first
 }
 
+bool Session::race_held(const Message& m) {
+  if (!race_ || !race_private(m)) return false;
+  ++stats_.race_dropped;
+  return true;
+}
+
 void Session::send(ConnectionId to, std::uint8_t channel, const Message& m) {
+  if (race_held(m)) return;  // what the server kept or makes of the world (a snapshot, an owner) too
   SendAction action{to, channel, {}};
   if (encode(m, action.bytes) != Error::none) return;  // our own message; cannot happen
   actions_.push_back(std::move(action));
 }
 
 void Session::send_to_others(ConnectionId except, std::uint8_t channel, const Message& m) {
+  if (race_held(m)) return;
   std::vector<std::uint8_t> bytes;
   if (encode(m, bytes) != Error::none) return;
   for (const auto& [id, c] : connections_) {
