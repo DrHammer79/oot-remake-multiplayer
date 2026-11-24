@@ -24,6 +24,7 @@
 #include "coop_difficulty.h"
 #include "coop_gold_mode.h"
 #include "coop_race_mode.h"
+#include "coop_switch_stand_mode.h"
 #include "coop_hook.h"
 #include "coop_hookshot.h"
 #include "coop_host_menu.h"
@@ -256,6 +257,7 @@ CoopPauseMenu::Session SessionNow() {
         s.pvp = CoopPvp::On();
         s.gold_own = CoopGoldMode::NotShared();
         s.race = CoopRaceMode::InForce();
+        s.floor_switches = CoopSwitchStandMode::InForce();
         s.dbno = rules.on;
         s.dbno_bleed_s = rules.bleed_s;
         s.dbno_revive_tenths = rules.revive_tenths;
@@ -587,6 +589,7 @@ bool Host(const CoopTitleMenu::Options& o, bool test) {
     CoopFiles::SetCoopEnvironment(o);
     CoopGoldMode::SetChoice(o.gold_own ? CoopGoldMode::Mode::own : CoopGoldMode::Mode::shared);   // (row 63)
     CoopRaceMode::SetChoice(o.race);
+    CoopSwitchStandMode::SetChoice(o.floor_switches);
     HosCoopHostOptions h{};
     h.size = sizeof h;
     h.name = o.name.c_str();
