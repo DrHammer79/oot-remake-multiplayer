@@ -611,6 +611,11 @@ bool IsBossPart(std::string_view name);
 // A boss or one of its parts named as one (what IsBoss was before row 149): the rules every boss actor shares
 // (its life, its hits, its slots and animations, its own native boss sync entry).
 bool IsBossOrPart(std::string_view name);
+// ai-turns: a plain enemy kind that takes turns between players like a boss (Session::next_turn, listed in its
+// presence with object_presence::takes_turns): the big one-on-one melee fighters whose attacks come one at a time
+// (Moblin, Lizalfos, Dinolfos, Stalfos, Like Like, Iron Knuckle). Exact actor names; never a boss, a part, a pack
+// helper (Haribote decoys), a shot (Moblin club shock wave) or a Wolfos (a pack that circles: known-issues.md).
+bool TurnsAsEnemy(std::string_view name);
 // Pair/pack survey: the family of enemies that fight together by messages between their AIs ("lizalfos" for
 // Lizalfos and Dinolfos, "stalfos", "wolfos"; empty: none). GroupsOf puts one family within kPackReach in one group
 // (root: the lowest id), so the pack has one owner and its teamwork runs in one game; never the boss bit (plain enemies).

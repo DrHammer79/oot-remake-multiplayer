@@ -3393,33 +3393,90 @@ TEST_CASE("review-geno-0119-3: a stun right after a boss turn still hands the bo
   CHECK(h.session.stats().boss_to_hitter == 1);
 }
 
-TEST_CASE("enemy turns: a plain enemy in a fight takes turns among the players near it") {
+// ai-turns: a plain enemy takes turns only of a kind its owner's game lists (object_presence::takes_turns), at most
+// once per 15 s. Its fight lasts 12 s after a hit, so the cases hit it at 0 s and at 10 s (the turn is due at 16 s).
+void enemy_fight(OwnerHarness& h, std::int32_t life_after) {
+  h.receive(1, ObjectSample{0, placed(7), 0, attack_state(life_after + 1, false)}, kChannelObjectSamples);  // a hit
+  h.clear();
+  h.run(10 * kSecond);
+  h.receive(1, ObjectSample{0, placed(7), 0, attack_state(life_after, false)}, kChannelObjectSamples);  // a hit again
+}
+
+SessionConfig enemy_turn_config() {
   SessionConfig config = turn_config();
-  config.enemy_turns = true;  // (off by default: review-geno-0119-4, its own case)
-  config.boss_turn_us = SessionConfig{}.boss_turn_us;  // 4 s: a plain enemy's fight lasts 12 s after a hit
-  {  // both players at it: player 2's turn at its attack's end
+  config.boss_turn_us = SessionConfig{}.boss_turn_us;  // 4 s
+  return config;
+}
+
+TEST_CASE("ai-turns: a plain enemy in a fight takes a turn among the players near it, not before 15 s") {
+  const SessionConfig config = enemy_turn_config();
+  REQUIRE(config.enemy_turns);  // on by default: the kinds are the hook's list (takes_turns)
+  {  // both players at it: player 2's turn at its attack's end after 15 s
     TurnHarness h(config);
     h.stand(1, 3);
     h.stand(2, 5);
-    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);  // a fight
-    h.clear();
-    h.run(7 * kSecond);
-    attack_ends(h, 1, 0, 11);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
     h.run(250'000);
     CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
     CHECK(h.session.stats().enemy_turns == 1);
     CHECK(h.session.stats().boss_turns == 0);
   }
-  {  // player 2 is 20 m off: not fighting it, no turn (a boss would take 40 m)
+  {  // an attack's end at 7 s (the report 138 shuttle): one move per 15 s, so none
     TurnHarness h(config);
     h.stand(1, 3);
-    h.stand(2, 20);
+    h.stand(2, 5);
     h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
     h.clear();
     h.run(7 * kSecond);
     attack_ends(h, 1, 0, 11);
     h.run(250'000);
+    CHECK(h.asks() == 0);
     CHECK(h.session.stats().enemy_turns == 0);
+  }
+  {  // player 2 is 20 m off: not fighting it, no turn (a boss would take 40 m)
+    TurnHarness h(config);
+    h.stand(1, 3);
+    h.stand(2, 20);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
+    h.run(250'000);
+    CHECK(h.session.stats().enemy_turns == 0);
+  }
+  {  // its owner is 20 m off (not one of two near): no turn
+    TurnHarness h(config);
+    h.stand(1, 20);
+    h.stand(2, 5);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
+    h.run(250'000);
+    CHECK(h.session.stats().enemy_turns == 0);
+  }
+  {  // player 2 is dead: no turn (one fit player near)
+    TurnHarness h(config);
+    h.stand(1, 3);
+    h.stand(2, 5);
+    h.receive(2, PlayerStatus{0, status::dead}, kChannelSession);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
+    h.run(250'000);
+    CHECK(h.session.stats().enemy_turns == 0);
+  }
+  {  // a kind its owner's game does not list (no takes_turns): it keeps the player it fights
+    TurnHarness h(config);
+    h.receive(1, present_in("Field", {placed(7)}), kChannelOwnership);
+    h.stand(1, 3);
+    h.stand(2, 5);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
+    h.run(250'000);
+    CHECK(h.asks() == 0);
+    CHECK(h.session.object_owner(placed(7)) == owned(1, 0));
   }
   {  // the switch
     SessionConfig off = config;
@@ -3427,47 +3484,98 @@ TEST_CASE("enemy turns: a plain enemy in a fight takes turns among the players n
     TurnHarness h(off);
     h.stand(1, 3);
     h.stand(2, 5);
-    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
-    h.clear();
-    h.run(7 * kSecond);
-    attack_ends(h, 1, 0, 11);
+    enemy_fight(h, 10);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
     h.run(250'000);
     CHECK(h.asks() == 0);
   }
 }
 
-TEST_CASE("review-geno-0119-4: by default a plain enemy keeps the player it fights, a boss still takes turns") {
-  // A plain enemy's AI chases only its owner's Link: a turn at each attack's end walked it to the other player and
-  // back (report 138's shuttle). enemy_turns is off by default; the same fight on a boss passes the turn.
-  SessionConfig config = turn_config();
-  config.boss_turn_us = SessionConfig{}.boss_turn_us;
-  REQUIRE_FALSE(config.enemy_turns);
-  {  // a plain enemy, both players at it, both on a build that takes turns: no turn
+TEST_CASE("ai-turns: a turn goes to the near player with fewer fighting enemies, never to an equal one") {
+  const SessionConfig config = enemy_turn_config();
+  {  // player 1 owns two fighting enemies, player 2 none: the turn of the first goes to player 2
     TurnHarness h(config);
+    h.receive(1, turns_present("Field", {placed(7), placed(8)}), kChannelOwnership);
+    h.receive(2, turns_present("Field", {placed(7), placed(8)}), kChannelOwnership);
     h.stand(1, 3);
     h.stand(2, 5);
-    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
-    h.clear();
-    h.run(7 * kSecond);
-    attack_ends(h, 1, 0, 11);
-    h.run(250'000);
-    CHECK(h.asks() == 0);
-    CHECK(h.session.stats().enemy_turns == 0);
-    CHECK(h.session.object_owner(placed(7)) == owned(1, 0));
-  }
-  {  // the same as a boss: player 2's turn
-    TurnHarness h(config);
-    h.stand(1, 3);
-    h.stand(2, 5);
-    h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
-    h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
-    h.clear();
-    h.run(7 * kSecond);
-    attack_ends(h, 1, 0, 11);
+    h.receive(1, ObjectSample{0, placed(8), 0, attack_state(11, false)}, kChannelObjectSamples);
+    enemy_fight(h, 10);
+    h.receive(1, ObjectSample{0, placed(8), 0, attack_state(10, false)}, kChannelObjectSamples);
+    h.run(6 * kSecond);
+    attack_ends(h, 1, 0, 10);
     h.run(250'000);
     CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
-    CHECK(h.session.stats().boss_turns == 1);
   }
+  {  // one fighting enemy each: nobody has fewer, so no turn (a spread pack stays spread)
+    TurnHarness h(config);
+    h.receive(2, turns_present("Field", {placed(8)}), kChannelOwnership);  // player 2 reports it first: its owner
+    h.receive(1, turns_present("Field", {placed(7), placed(8)}), kChannelOwnership);
+    h.stand(1, 3);
+    h.stand(2, 5);
+    h.receive(2, ObjectSample{0, placed(8), 0, attack_state(11, false)}, kChannelObjectSamples);
+    enemy_fight(h, 10);
+    h.receive(2, ObjectSample{0, placed(8), 0, attack_state(10, false)}, kChannelObjectSamples);
+    h.run(6 * kSecond);
+    REQUIRE(h.session.object_owner(placed(8)) == owned(2, 0));
+    attack_ends(h, 1, 0, 10);
+    h.run(250'000);
+    CHECK(h.session.stats().enemy_turns == 0);
+  }
+}
+
+TEST_CASE("ai-turns: three players near one enemy: one move per 15 s at most, round, never back and forth") {
+  TurnHarness h(enemy_turn_config());
+  h.join(3, "Saria");
+  h.receive(3, turns_present("Field", {placed(7)}), kChannelOwnership);
+  h.stand(1, 3);
+  h.stand(2, 5);
+  h.stand(3, 7);
+  h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
+  h.clear();
+  ConnectionId owner = 1;
+  std::uint16_t epoch = 0;
+  std::int32_t life = 11;
+  std::vector<ConnectionId> owners{1};
+  // 90 s of a fight: a hit every 10 s, an attack's end every 5 s, a move answered at once.
+  for (int step = 1; step <= 18; ++step) {
+    h.run(5 * kSecond);
+    if (step % 2 == 0) {
+      h.receive(owner, ObjectSample{0, placed(7), epoch, attack_state(--life, false)}, kChannelObjectSamples);
+    }
+    attack_ends(h, owner, epoch, life);
+    h.run(250'000);
+    const auto asks = messages_to<HandoverAsk>(h, owner);
+    if (!asks.empty()) {
+      h.receive(owner, HandoverState{0, placed(7), epoch, attack_state(life, false)}, kChannelOwnership);
+      owner = asks.front().to_player;
+      ++epoch;
+      owners.push_back(owner);
+      h.receive(owner, ObjectSample{0, placed(7), epoch, attack_state(life, false)}, kChannelObjectSamples);
+    }
+    h.clear();
+  }
+  CHECK(h.session.stats().enemy_turns == owners.size() - 1);
+  CHECK(h.session.stats().enemy_turns <= 6);  // 90 s / 15 s
+  CHECK(h.session.stats().enemy_turns >= 3);  // and it does turn
+  for (std::size_t i = 2; i < owners.size(); ++i) CHECK(owners[i] != owners[i - 2]);  // 1 2 3 1 ..., no A-B-A
+}
+
+TEST_CASE("review-geno-0119-4: a boss takes a turn after 4 s, a plain enemy needs 15 s") {
+  // A plain enemy's AI chases only its owner's Link: a turn at each attack's end walked it to the other player and
+  // back (report 138's shuttle). A boss passes the turn after boss_turn_us.
+  TurnHarness h(enemy_turn_config());
+  h.stand(1, 3);
+  h.stand(2, 5);
+  h.receive(1, ObjectGroup{0, {{placed(7), placed(7), object_group::boss}}}, kChannelOwnership);
+  h.receive(1, ObjectSample{0, placed(7), 0, attack_state(11, false)}, kChannelObjectSamples);
+  h.clear();
+  h.run(7 * kSecond);
+  attack_ends(h, 1, 0, 11);
+  h.run(250'000);
+  CHECK(messages_to<HandoverAsk>(h, 1) == std::vector<HandoverAsk>{{placed(7), 0, 2}});
+  CHECK(h.session.stats().boss_turns == 1);
 }
 
 TEST_CASE("every enemy in a fight leaves an owner who died at once, out of a fight after 10 s") {

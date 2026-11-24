@@ -639,6 +639,15 @@ bool IsBossOrPart(std::string_view name) {
     return false;
 }
 
+bool TurnsAsEnemy(std::string_view name) {
+    static constexpr std::string_view kKinds[] = {
+        "Enemy_Moblin",     "Enemy_Moblin_Club",       "Enemy_Lizalfos",         "Enemy_Dinolfos",
+        "Enemy_Stalfos",    "Enemy_Stalfos_Weak",      "Enemy_Stalfos_ForChild", "Enemy_LikeLike",
+        "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_White", "Enemy_IronKnuckle_Silver",
+    };
+    return !IsBossOrPart(name) && std::find(std::begin(kKinds), std::end(kKinds), name) != std::end(kKinds);
+}
+
 namespace {
 bool IsGroupRoot(std::string_view name) {
     for (const PartRule& rule : PartRules()) {
@@ -3584,8 +3593,8 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         if (std::find(unready_.begin(), unready_.end(), o.name) != unready_.end()) {
             flags |= proto::object_presence::unready;
         }
-        if (takes_turns_ && IsBossOrPart(o.name)) {
-            flags |= proto::object_presence::takes_turns;  // boss turns: this build reads attacks
+        if (takes_turns_ && (IsBossOrPart(o.name) || TurnsAsEnemy(o.name))) {
+            flags |= proto::object_presence::takes_turns;  // boss turns, ai-turns kinds: this build reads attacks
         }
         if (PresenceFlagsBattleManager(IsBattleManager(o.name), shares_orders_)) {
             flags |= proto::object_presence::battle_manager;  // row 222 C: its group moves only from an unfit owner
