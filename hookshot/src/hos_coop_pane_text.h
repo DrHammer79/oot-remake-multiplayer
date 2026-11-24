@@ -3,7 +3,7 @@
    boxes").
 
    One wrapped game function more in the one wrap table (patch 0005's nx2/coop_world_wraps.py WRAPS; the ids are in
-   the one wrap space of hos_coop_world.h). Patch 0037 adds its row and this file (Hookshot's host/hos_coop_pane_text.h
+   the one wrap space of hos_coop_world.h). Patch 0041 adds its row and this file (Hookshot's host/hos_coop_pane_text.h
    is the same file). The module's hos_coop_wrap gets it; Hookshot announces it in HOS_COOP_WORLD_HELLO's bits. The row:
      (25, 0x439520, (0xd503237f, 0xa9bd7bfd, 0xf9000bf5, 0xa9024ff4)),  # pacibsp; stp x29, x30; str x21; stp x20, x19
    Phase 0 only reads (never skips): x0 the pane (0xb0 bytes in its layout's array), x1 a reference {+0 the text,

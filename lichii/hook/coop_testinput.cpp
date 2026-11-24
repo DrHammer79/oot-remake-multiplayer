@@ -69,7 +69,63 @@ bool Ticks(std::string_view word, std::uint32_t& out) {
     return true;
 }
 
+// One scenario grammar for both readers (row 325 review): tools/autotest/hookshot.py's parse takes the same words for
+// TICKS and numbers as this parser (its _ticks, _await_ticks, _number, _whole_in, _int32), so a line one of them
+// plays is never refused by the other.
+//
+// A runner-only step's TICKS (await): hookshot.py's _await_ticks, any whole number from 0 up (the most it waits; 0: no
+// wait). Not Ticks: that is the rule of the module's own timed steps (1 up to kMaxStepTicks), and a line the runner
+// plays must not be refused here.
+bool RunnerTicks(std::string_view word) {
+    if (word.empty()) {
+        return false;
+    }
+    for (const char c : word) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A plain decimal: [+-] digits [. digits] or [+-] . digits, then an optional exponent (e [+-] digits); hookshot.py's
+// _DECIMAL. strtod alone also takes hex ("0x10"), "inf" and "nan", which Python's float() reads otherwise or not.
+bool Decimal(std::string_view word) {
+    std::size_t i = 0;
+    const auto digits = [&] {
+        const std::size_t from = i;
+        while (i < word.size() && word[i] >= '0' && word[i] <= '9') {
+            ++i;
+        }
+        return i - from;
+    };
+    if (i < word.size() && (word[i] == '+' || word[i] == '-')) {
+        ++i;
+    }
+    std::size_t mantissa = digits();
+    if (i < word.size() && word[i] == '.') {
+        ++i;
+        mantissa += digits();
+    }
+    if (mantissa == 0) {
+        return false;
+    }
+    if (i < word.size() && (word[i] == 'e' || word[i] == 'E')) {
+        ++i;
+        if (i < word.size() && (word[i] == '+' || word[i] == '-')) {
+            ++i;
+        }
+        if (digits() == 0) {
+            return false;
+        }
+    }
+    return i == word.size();
+}
+
 bool Axis(std::string_view word, std::int32_t& out) {
+    if (!Decimal(word)) {
+        return false;
+    }
     const std::string s(word);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
@@ -136,6 +192,9 @@ bool Keys(std::string_view word, Step& step, std::string& bad) {
 }
 
 bool Number(std::string_view word, float& out) {
+    if (!Decimal(word)) {
+        return false;
+    }
     const std::string s(word);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
@@ -414,12 +473,13 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             const auto to = static_cast<std::size_t>(w.back().data() + w.back().size() - line.data());
             step.mark = std::string(line.substr(from, to - from));
         } else if (cmd == "MENU") {
-            // menu customize|close: the Customize page opened, or the menu closed. Test only.
+            // menu customize|close|host: the Customize page opened, the menu closed, or the game hosts through the
+            // Multiplayer page's Host (hookshot.py --host-in-game: LICHII_COOP_TEST_HOST). Test only.
             std::string page = w.size() == 2 ? std::string(w[1]) : std::string{};
             std::transform(page.begin(), page.end(), page.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (page != "customize" && page != "close") {
-                return fail("want: menu customize|close");
+            if (page != "customize" && page != "close" && page != "host") {
+                return fail("want: menu customize|close|host");
             }
             step.kind = Kind::menu;
             step.mark = page;
@@ -481,6 +541,18 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
                 return fail("want: give ITEM");
             }
             step.kind = Kind::give;
+            step.mark = std::string(w[1]);
+        } else if (cmd == "EVENT") {
+            // event NAME: our game asked to play the event setting NAME (an RSDB EventSetting row) by name, through
+            // the hook's live-event requester (the path the shared boss intros take). Test only. boss-route-01112:
+            // a boss rush stage reached by `warp` misses the boot event the game's own rematch reserves with the
+            // scene change (DreamBossStage's BossStageEnterBase calls: BootEventName), and Barinade and Ganondorf
+            // appear only through theirs (DreamBossStage_Rematch_<Boss>_Start: DreamWorld_BossAppear on, the
+            // boss's EventTriggerSetWasAppearInEvent); their stages have no asker of their own.
+            if (w.size() != 2) {
+                return fail("want: event NAME");
+            }
+            step.kind = Kind::event;
             step.mark = std::string(w[1]);
         } else if (cmd == "SETFLAG") {
             // setflag NAME VALUE: this game's Int or Bool flag NAME (a GameDataList
@@ -574,6 +646,15 @@ std::optional<Script> Parse(std::string_view text, std::string& error) {
             }
             step.kind = Kind::mark;
             step.mark = std::string(w[1]);
+        } else if (cmd == "AWAIT") {
+            // tools/autotest/hookshot.py's own step (row 325): it reads the game's log until a new line matches, the
+            // module is never asked anything for it (never in the commands file). One scenario grammar for both
+            // readers: its shape is checked here and it makes no module step (test_hookshot.py checks that every
+            // verb the runner reads is one of this parser's).
+            if (w.size() < 3 || !RunnerTicks(w[1])) {
+                return fail("want: await TICKS REGEX (the runner's own step)");
+            }
+            continue;
         } else {
             return fail("unknown command " + std::string(w[0]));
         }
@@ -676,7 +757,8 @@ void Runner::Advance(double now_s, std::optional<std::array<float, 2>> player,
         if (s.kind == Kind::warp || s.kind == Kind::give || s.kind == Kind::wear ||
             s.kind == Kind::assign || s.kind == Kind::dress || s.kind == Kind::chat || s.kind == Kind::kill || s.kind == Kind::drop || s.kind == Kind::hurt ||
             s.kind == Kind::hit || s.kind == Kind::stun ||
-            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump) {
+            s.kind == Kind::setflag || s.kind == Kind::setenum || s.kind == Kind::menu || s.kind == Kind::dump ||
+            s.kind == Kind::event) {
             requests_.push_back(Request{s.kind, s.mark, s.start, {}, s.id});
             ++index_;
             continue;
@@ -1477,6 +1559,7 @@ bool NowKind(Kind k) {
     case Kind::mark: case Kind::give: case Kind::wear: case Kind::assign: case Kind::dress: case Kind::chat:
     case Kind::place: case Kind::face: case Kind::aim: case Kind::kill: case Kind::hurt: case Kind::hit:
     case Kind::stun: case Kind::drop: case Kind::setflag: case Kind::setenum: case Kind::menu: case Kind::dump:
+    case Kind::event:
         return true;
     default:
         return false;
@@ -1513,6 +1596,11 @@ void Do(Core::System& system, const Runner::Request& request, double now,
         SetEnum(system, request.name, request.start);
     } else if (request.kind == Kind::dump) {
         Dump(system, request.name);
+    } else if (request.kind == Kind::event) {
+        // Asked when no event runs and our game is in a session with live events on (coop_hook.cpp); the
+        // requester's own lines say when it was asked and whether the game took it.
+        CoopBoss::WantEvent(request.name);
+        LOG_INFO(Core, "coop: test event {}: handed to the live-event requester", request.name);
     } else if (request.kind == Kind::place && !request.name.empty()) {
         const auto on = CoopObjects::TestPlatformPlace(request.name);
         const bool ok = on && CoopBoss::MoveLink(system, g_state.main,

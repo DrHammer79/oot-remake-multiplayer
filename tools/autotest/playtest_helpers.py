@@ -436,13 +436,13 @@ def strike(client, line, name, ident=None, frames=STRIKE_FRAMES, death_frames=No
 # The talk ends when the event has ended and no new text came; the cursor is taken to start on the first button.
 # Read in a lane run (Kokiri shop, Mido; game 0001-0037): a talk is `MessageDialog_00` (T_Name_00 and T_NameNavi_00 the
 # speaker), its reply buttons `PaMessageBtn_00` (ONE pane, T_Btn_00, set once per button). The box's body did not come
-# through the wrap there (another setter): BOX_PANES are kept for when it does. Patch 0038 wraps the letter-animated
+# through the wrap there (another setter): BOX_PANES are kept for when it does. Patch 0042 wraps the letter-animated
 # pane's set-text (BODY_WRAP, read from main only): a text of a message layout from it is a box, whatever its pane.
 MESSAGE_LAYOUTS = ("MessageInGame", "BalloonMessage", "MessageDialog", "MessageLog")
 CHOICE_LAYOUTS = ("PaMessageBtn",)
 BOX_PANES = ("T_MessageWhiteOut_00", "T_Message_00")
 NAME_PANES = ("T_Name_00", "T_NameNavi_00")
-BODY_WRAP = 26         # a text's `wrap` from patch 0038's letter-animated pane setter
+BODY_WRAP = 26         # a text's `wrap` from patch 0042's letter-animated pane setter
 TALK_BOXES = 20        # a talk reads at most this many boxes
 TALK_FRAMES = 1200     # ... and gives up after this many frames with nothing new (no box, name or buttons)
 TALK_TOTAL = 7200      # ... and never runs more than this many frames in all
@@ -501,7 +501,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
     the reply buttons. Presses A to go on, and when buttons show picks the next of `reply` (one text, or a list: one
     per set of buttons, in order) by Down and A. With no reply left it stops and lists the buttons, the talk left open:
     call again with `reply` and `since` (this answer's `since`) to go on from there, no new A first.
-    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0037),
+    Stops when the talk is over (`done`), or says why: not reached, no prompt, no text (this exe lacks patch 0041),
     choices and no reply, reply not offered, too many boxes, timed out, scene changed, loading.
     Returns result, done, speakers (in order), boxes [{speaker, text, markup, raw}], choices (the last seen), picked
     [{text, index}], since, presses, frames. A box's `text` is its words without the markup; `raw` (only when markup
@@ -519,7 +519,7 @@ def talk(client, ident=None, name=None, reply=None, max_boxes=TALK_BOXES, max_fr
         hooked, seen = None, 0
         why = "no text: the bridge has no `text` verb (%s)" % e.code
     if hooked is False:
-        why = "no text: this Hookshot has no pane text wrap (patch 0037)"
+        why = "no text: this Hookshot has no pane text wrap (patch 0041)"
     st = pc.game_of(client.state())
     if since is not None and hooked and st.get("event"):
         out["frames"] = 0                       # (going on with a talk that is open: no first A)

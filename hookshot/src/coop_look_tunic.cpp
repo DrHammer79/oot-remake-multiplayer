@@ -2,6 +2,7 @@
 #include "coop_look_tunic.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -35,14 +36,16 @@ void Fail(std::string* why, std::string text) {
     }
 }
 
-// Memory is compared in pieces of kComparePiece bytes, read into the stack: no heap. A buffer of up to 4 MiB made
-// for each texture compared, every step, failed once the PC's memory ran out while two games started (lane
-// 2026-11-23: "the paging file is too small" in Windows' log, then std::bad_alloc out of the look worker).
+// The game's memory at `address` holds the first `size` bytes of `texels`. Read and compared kComparePiece at a time
+// in a buffer on this (the look worker's) stack: nothing allocated per call, whatever the texture's size (row 260).
 bool Same(const Textures& memory, std::uint64_t address, const std::vector<std::uint8_t>& texels, std::size_t size) {
-    std::uint8_t piece[kComparePiece];
-    for (std::size_t at = 0; at < size; at += kComparePiece) {
-        const std::size_t n = std::min(kComparePiece, size - at);
-        if (!memory.Read(address + at, piece, n) || std::memcmp(piece, texels.data() + at, n) != 0) {
+    if (size > texels.size()) {
+        return false;
+    }
+    std::array<std::uint8_t, kComparePiece> piece;
+    for (std::size_t at = 0; at < size; at += piece.size()) {
+        const std::size_t n = std::min(piece.size(), size - at);
+        if (!memory.Read(address + at, piece.data(), n) || std::memcmp(piece.data(), texels.data() + at, n) != 0) {
             return false;
         }
     }
