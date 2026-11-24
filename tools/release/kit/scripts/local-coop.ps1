@@ -19,7 +19,13 @@
 #  - Nobody's title is pressed: each player loads a save (or presses Continue) as in any join.
 #  - Game 1 closing ends its server, so the others get the usual "the host left".
 
-$script:KitLocalDirsNotLinked = @('user', 'logs', 'local-players', 'nucleus-players', 'bug-reports', 'playtest')
+$script:KitLocalDirsNotLinked = @('user', 'logs', 'cache', 'local-players', 'nucleus-players', 'bug-reports', 'playtest')
+# The game's cache\ (Longshot since v3.0.0, host/game_layout.c: the shader and pipeline caches, several of them written in
+# place, and cache\prompts made from the player's controls). Each game its own folder, never a junction to game 1's
+# (two to four games writing one file in place): seeded once with a copy of each file game 1 has, then its own.
+# prompts\ and the lock files are left out (made again).
+$script:KitLocalCacheDir = 'cache'
+$script:KitLocalCacheSkipped = '^(?i)(.+\.lock|.+\.tmp(-.*)?|longshot_pipelines\.bin\.(running|predicting))$'
 # The small files a game writes in place (not through a .tmp moved over them): each game its own copy, made once.
 # (as tools/nucleus/OoTCoop.js Game.FileSymlinkCopyInstead)
 $script:KitLocalCopied = @('longshot_options.ini', 'language.txt', 'longshot_pipeline_states.bin', 'longshot_compute_variants.bin',
@@ -158,6 +164,7 @@ function Sync-KitLocalInstance([string]$Game, [string]$Inst) {
         try { New-Item -ItemType Junction -Path $to -Target $d.FullName -ErrorAction Stop | Out-Null }
         catch { $said += "Local co-op: could not link $($d.Name) into $Inst ($($_.Exception.Message))." }
     }
+    $said += @(Sync-KitLocalCache (Join-Path $Game $script:KitLocalCacheDir) (Join-Path $Inst $script:KitLocalCacheDir))
     foreach ($f in @(Get-ChildItem -LiteralPath $Game -File -Force -ErrorAction SilentlyContinue)) {
         $to = Join-Path $Inst $f.Name
         if ($script:KitLocalCopied -contains $f.Name) {
@@ -173,6 +180,27 @@ function Sync-KitLocalInstance([string]$Game, [string]$Inst) {
         } catch { $said += "Local co-op: could not put $($f.Name) into $Inst ($($_.Exception.Message))." }
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $Inst 'user') | Out-Null
+    return $said
+}
+
+# Player N's own cache\ ($To) from the game's ($From): a junction made by an earlier kit (all games in one cache) becomes a
+# folder of its own; each file of $From that $To does not have yet is copied in (only the top: prompts\ is made again).
+# Returns the lines to say (problems only).
+function Sync-KitLocalCache([string]$From, [string]$To) {
+    $said = @()
+    $item = Get-Item -LiteralPath $To -Force -ErrorAction SilentlyContinue
+    if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        # (Directory.Delete of a junction removes the link only, never game 1's files)
+        try { [System.IO.Directory]::Delete($To, $false) } catch { return @("Local co-op: could not replace the shared cache link $To ($($_.Exception.Message)).") }
+    }
+    try { New-Item -ItemType Directory -Force -Path $To -ErrorAction Stop | Out-Null } catch { return @("Local co-op: could not make $To ($($_.Exception.Message)).") }
+    foreach ($f in @(Get-ChildItem -LiteralPath $From -File -Force -ErrorAction SilentlyContinue)) {
+        if ($f.Name -match $script:KitLocalCacheSkipped) { continue }
+        $dst = Join-Path $To $f.Name
+        if (Test-Path -LiteralPath $dst) { continue }
+        try { Copy-Item -LiteralPath $f.FullName -Destination $dst -ErrorAction Stop }
+        catch { $said += "Local co-op: could not copy $($f.Name) into $To ($($_.Exception.Message)): that game builds it again." }
+    }
     return $said
 }
 

@@ -871,6 +871,30 @@ function Find-KitHookshotCachedGame([string]$Stamp, [string]$Root = '', [bool]$D
     return ''
 }
 
+# What a run of the game makes in its game folder that belongs to that folder's player, not to the build (Longshot since
+# v3.0.0, host/game_layout.c): logs\ and cache\prompts (made from the player's controls), beside longshot.exe (bin\ in a
+# builder's game folder) and at the top. Full paths, for robocopy /XD: a copy of a game folder leaves them out.
+function Get-KitGameRunFolders([string]$Game) {
+    $dirs = @($Game)
+    $exe = Get-KitHookshotExe $Game
+    if ($exe) { $d = Split-Path -Parent $exe; if ($d.TrimEnd('\') -ine $Game.TrimEnd('\')) { $dirs += $d } }
+    $out = @()
+    foreach ($d in $dirs) { $out += @((Join-Path $d 'logs'), (Join-Path $d 'cache\prompts')) }
+    return $out
+}
+# Deletes the shader and pipeline caches of a game folder's cache\ (beside longshot.exe; its prompts\ stays): before
+# another build's files are copied in, so the folder never holds two builds' caches. Longshot makes them again.
+function Clear-KitGameShaderCache([string]$Game) {
+    $dirs = @($Game)
+    $exe = Get-KitHookshotExe $Game
+    if ($exe) { $dirs += Split-Path -Parent $exe }
+    foreach ($d in ($dirs | Select-Object -Unique)) {
+        $c = Join-Path $d 'cache'
+        if (-not (Test-Path -LiteralPath $c -PathType Container)) { continue }
+        Get-ChildItem -LiteralPath $c -File -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # A game folder built with NVIDIA DLSS (#234): make_game.py's place_ngx_runtime puts DLSS's runtime in its ngx folder
 # when the build had NVIDIA's SDK, and removes it when a build had none.
 function Test-KitHookshotDlss([string]$Game) {

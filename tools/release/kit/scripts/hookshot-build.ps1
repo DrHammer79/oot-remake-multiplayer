@@ -569,6 +569,9 @@ if (-not $Rebuild -and -not $CheckOnly -and $Out -ieq $defaultOut -and -not (Fin
         # (not that kit's other players: local co-op's local-players\playerN and Nucleus's nucleus-players hold their saves,
         # and robocopy would follow the instances' links into romfs and mods, a second game each)
         $xdPlayers = @('local-players', 'nucleus-players') | ForEach-Object { Join-Path $from $_ }
+        # (nor that kit's logs\ and button prompts (Longshot since v3.0.0 keeps them in logs\ and cache\prompts beside the
+        # exe, host/game_layout.c): this game writes its own; its shader caches in cache\ are taken, same build, same PC)
+        $xdPlayers += @(Get-KitGameRunFolders $from)
         & robocopy $from $Out /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD @xdPlayers /XF coop.ini coop-options.ini coop-player.ini *.log *_log.txt $KitGameUnfinishedFile | Out-Null
         if ($LASTEXITCODE -ge 8 -or -not (Find-HookshotExe $Out)) {
             Write-Host "  Copying failed (robocopy $LASTEXITCODE): the game is built here instead." -ForegroundColor Yellow
@@ -630,11 +633,18 @@ if (-not $Rebuild -and -not $CheckOnly -and (Find-HookshotExe $Out) -and (Test-P
         if ($from) {
             Step "The game: copying the build of this version from the game cache on this PC ($from), instead of building it again"
             $xd = @('user', 'save', 'autotest-save', 'mods', 'local-players', 'nucleus-players') | ForEach-Object { Join-Path $from $_ }
+            # (Longshot since v3.0.0, host/game_layout.c: the player's logs\ and cache\prompts stay; the game files are
+            # the player's own, and the romfs junction is never followed: robocopy wrote the cached game's files into
+            # the folder it names, the player's own unpacked game, and failed when that is read-only or held)
+            $xd += @(Get-KitGameRunFolders $from) + @(Join-Path $from 'romfs')
             # (its build stamp last: a copy that stops half way leaves the old stamp, and the game is built again)
             $xf = @('hookshot_coop.dll', 'coop.ini', 'coop-options.ini', 'longshot_log.txt', 'longshot_log.old.txt', 'control.json', 'longshot_options.ini', 'language.txt',
                 'coop-built-from.txt', $KitGameUnfinishedFile) | ForEach-Object { Join-Path $from $_ }
             # (marked first: a copy that stops half way leaves files of two builds, never started or kept as either)
             Start-KitGameWrite $Out 'a copy from the game cache'
+            # (the shader caches in the game's cache\ were made for the build it replaces: they go, and the cached build's
+            # come in their place, never a mix of the two builds' files; Longshot makes again what is missing)
+            Clear-KitGameShaderCache $Out
             & robocopy $from $Out /E /XJD /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XD @xd /XF @xf | Out-Null
             if ($LASTEXITCODE -ge 8 -or -not (Find-HookshotExe $Out)) {
                 Write-Host "  Copying failed (robocopy $LASTEXITCODE): the game is built again instead." -ForegroundColor Yellow

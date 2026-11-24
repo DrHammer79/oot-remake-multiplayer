@@ -1991,7 +1991,16 @@ try {
     Write-File "$g5\save\slot_00\progress.sav" 'MY SAVE'
     Write-File "$g5\coop.ini" "name = Saria`n"
     Write-File "$g5\longshot_options.ini" 'my graphics'
-    Write-File "$g5\romfs\Actor\x.bin" 'my game files'
+    # (the player's game files in a folder of their own, the game's romfs a junction to it; read-only, as an unpacked
+    # game can be: a copy that followed the junction failed on them, cache-move)
+    Write-File "$kc\my-game\romfs\Actor\x.bin" 'my game files'
+    New-Item -ItemType Junction -Path "$g5\romfs" -Target "$kc\my-game\romfs" | Out-Null
+    (Get-Item -LiteralPath "$kc\my-game\romfs\Actor\x.bin").IsReadOnly = $true
+    # (Longshot since v3.0.0 keeps its caches and logs in cache\ and logs\: the newer build's, and the player's own)
+    Write-File "$g5\cache\longshot_vk_pipelines.bin" 'newer build pipelines'
+    Write-File "$g5\cache\longshot_programs.bin" 'newer build programs'
+    Write-File "$g5\cache\prompts\Common.key" 'my prompts'
+    Write-File "$g5\logs\longshot_log.1.txt" 'my log'
     Write-File "$k5\hookshot\game-folder.txt" "hookshot\game`n"
     $cache = "$kc\hs-cache"
     Write-File "$cache\0123456789abcdef0123\stamp.txt" ($stampOld.Replace("`n", "`r`n") + "`r`n")
@@ -1999,6 +2008,11 @@ try {
     Write-File "$cache\0123456789abcdef0123\game\coop-built-from.txt" $stampOld
     Write-File "$cache\0123456789abcdef0123\game\longshot_options.ini" 'cache graphics'
     Write-File "$cache\0123456789abcdef0123\game\save\slot_00\progress.sav" 'NOT MINE'
+    # (an entry as hs.py stores it: the game files, its own caches, logs and prompts of the runs made with it)
+    Write-File "$cache\0123456789abcdef0123\game\romfs\Actor\x.bin" 'cached game files'
+    Write-File "$cache\0123456789abcdef0123\game\cache\longshot_programs.bin" 'older build programs'
+    Write-File "$cache\0123456789abcdef0123\game\cache\prompts\Common.key" 'not my prompts'
+    Write-File "$cache\0123456789abcdef0123\game\logs\longshot_log.1.txt" 'not my log'
     Write-File "$cache\fedcba9876543210fedc\stamp.txt" $stampKc
     Write-File "$cache\fedcba9876543210fedc\game\longshot.exe" 'NEWER BUILD'
     Check ((Find-KitHookshotCachedGame $stampOld $cache) -eq "$cache\0123456789abcdef0123\game") 'revert game: the cache entry of a stamp is found (its CRLF stamp.txt too)'
@@ -2020,6 +2034,11 @@ try {
     Check (-not (Test-Path -LiteralPath "$g5\ngx")) 'dlss: a copy without DLSS into a kit without it leaves no NVIDIA runtime behind'
     Check ((Read-File "$g5\save\slot_00\progress.sav") -eq 'MY SAVE' -and (Read-File "$g5\longshot_options.ini") -eq 'my graphics' -and
         (Read-File "$g5\romfs\Actor\x.bin") -eq 'my game files' -and (Read-File "$g5\coop.ini") -match 'Saria') 'revert game: saves, settings, coop.ini and the game files stay the player''s'
+    Check (((Get-Item -LiteralPath "$g5\romfs" -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -and
+        (Read-File "$kc\my-game\romfs\Actor\x.bin") -eq 'my game files') 'cache-move: the romfs junction is not followed (the player''s game files are not written)'
+    Check ((Read-File "$g5\cache\longshot_programs.bin") -eq 'older build programs' -and -not (Test-Path -LiteralPath "$g5\cache\longshot_vk_pipelines.bin")) 'cache-move: the shader caches are the cached build''s only, none of the replaced build''s left'
+    Check ((Read-File "$g5\cache\prompts\Common.key") -eq 'my prompts' -and (Read-File "$g5\logs\longshot_log.1.txt") -eq 'my log') 'cache-move: the player''s logs and button prompts stay'
+    (Get-Item -LiteralPath "$kc\my-game\romfs\Actor\x.bin").IsReadOnly = $false
 } finally {
     Remove-Item -LiteralPath $kc -Recurse -Force -ErrorAction SilentlyContinue
 }

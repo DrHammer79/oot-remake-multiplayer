@@ -38,6 +38,11 @@ try {
     Write-File (Join-Path $game 'mods\m.txt') 'mod'
     Write-File (Join-Path $game 'user\save\host.sav') 'x'
     Write-File (Join-Path $game 'logs\longshot_log.txt') 'p1 log'
+    # (Longshot since v3.0.0: the caches in cache\, some written in place, and cache\prompts made from the controls)
+    Write-File (Join-Path $game 'cache\longshot_pipeline_states.bin') 'p1 states'
+    Write-File (Join-Path $game 'cache\longshot_programs.bin') 'p1 programs'
+    Write-File (Join-Path $game 'cache\longshot_programs.bin.lock') ''
+    Write-File (Join-Path $game 'cache\prompts\Common.key') 'p1 prompts'
 
     # --- How many players ---
     $env:OOT_COOP_LOCAL_PLAYERS = '3'
@@ -80,6 +85,19 @@ try {
         Check (-not (Test-Path (Join-Path $inst $own)) -or (Read-File (Join-Path $inst $own)) -ne (Read-File (Join-Path $game $own))) "instance: $own is not player 1's"
     }
     Check ((Read-File (Join-Path $inst 'longshot_pipeline_states.bin')) -eq 'cache') 'instance: a file the game writes in place is copied'
+    $ic = Join-Path $inst 'cache'
+    Check ((Test-Path -LiteralPath $ic -PathType Container) -and -not (Test-Link $ic)) 'cache-move: cache\ is the instance''s own folder, not a junction to game 1''s'
+    Check ((Read-File (Join-Path $ic 'longshot_pipeline_states.bin')) -eq 'p1 states' -and (Read-File (Join-Path $ic 'longshot_programs.bin')) -eq 'p1 programs') 'cache-move: game 1''s caches are copied in once'
+    Check (-not (Test-Path (Join-Path $ic 'longshot_programs.bin.lock')) -and -not (Test-Path (Join-Path $ic 'prompts'))) 'cache-move: lock files and prompts are not copied (made again)'
+    Write-File (Join-Path $ic 'longshot_pipeline_states.bin') 'p2 states'
+    [void](Sync-KitLocalInstance $game $inst)
+    Check ((Read-File (Join-Path $ic 'longshot_pipeline_states.bin')) -eq 'p2 states' -and (Read-File (Join-Path $game 'cache\longshot_pipeline_states.bin')) -eq 'p1 states') 'cache-move: the instance''s cache stays its own, game 1''s untouched'
+    # An instance an earlier kit made: cache\ a junction to game 1's. It becomes its own folder; game 1's files stay.
+    [System.IO.Directory]::Delete($ic, $true)
+    New-Item -ItemType Junction -Path $ic -Target (Join-Path $game 'cache') | Out-Null
+    $said = @(Sync-KitLocalInstance $game $inst)
+    Check (-not (Test-Link $ic) -and (Read-File (Join-Path $ic 'longshot_programs.bin')) -eq 'p1 programs' -and $said.Count -eq 0) "cache-move: an old cache junction becomes the instance's own folder ($($said -join ' | '))"
+    Check ((Read-File (Join-Path $game 'cache\longshot_programs.bin')) -eq 'p1 programs' -and (Read-File (Join-Path $game 'cache\prompts\Common.key')) -eq 'p1 prompts') 'cache-move: game 1''s cache is left as it was'
     # A rebuild replaces the module: linked again at the next start.
     Remove-Item -LiteralPath (Join-Path $game 'hookshot_coop.dll')
     Write-File (Join-Path $game 'hookshot_coop.dll') 'module v2'
