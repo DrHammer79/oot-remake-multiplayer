@@ -423,6 +423,9 @@ def _choice_text(t):
     return any(name in (t.get("layout") or "") for name in CHOICE_LAYOUTS)
 
 
+PAGE_BREAK = (0, 4)  # the markup tag (group, type) that starts a new page of the same text
+
+
 def strip_markup(text):
     """The words of a box text without its markup. The game's text holds tags as bytes: 0x0e, then group, type and size
     (16-bit little-endian each), then `size` bytes of parameters (a name such as an animation or a variable, a pause,
@@ -434,6 +437,9 @@ def strip_markup(text):
             if i + 7 <= n and ord(text[i + 5]) < 256 and ord(text[i + 6]) < 256:
                 size = ord(text[i + 5]) | ord(text[i + 6]) << 8
                 if i + 7 + size <= n:
+                    kind = (ord(text[i + 1]) | ord(text[i + 2]) << 8, ord(text[i + 3]) | ord(text[i + 4]) << 8)
+                    if kind == PAGE_BREAK and out and not out[-1].isspace():
+                        out.append(" ")  # a page break ends a sentence: its two sides are not one word
                     i += 7 + size
                     continue
             i += 1

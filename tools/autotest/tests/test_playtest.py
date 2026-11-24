@@ -626,6 +626,17 @@ class TalkTest(unittest.TestCase):
         self.assertEqual([b["text"] for b in r["boxes"]], ["Line 1"])
 
     # --- markup, repeats, the speaker and the frame cap (a lane run of patch 0038: Kokiri shop and Mido) -------------
+    def test_strip_markup_page_break_is_a_space(self):
+        # The page break (group 0, type 4, no params) ends a page: its two sides are two sentences, not one word.
+        self.assertEqual(ph.strip_markup("Link!" + tag(0, 4) + "Let's go."), "Link! Let's go.")
+        # No second space when the text already has one, or a newline, at the break.
+        self.assertEqual(ph.strip_markup("Link! " + tag(0, 4) + "Let's go."), "Link! Let's go.")
+        self.assertEqual(ph.strip_markup("Link!\n" + tag(0, 4) + "Let's go."), "Link!\nLet's go.")
+        # A break at the start or the end leaves no space at the edge.
+        self.assertEqual(ph.strip_markup(tag(0, 4) + "Start" + tag(0, 4)), "Start")
+        # Other tags still join without a space.
+        self.assertEqual(ph.strip_markup("a" + tag(0, 3, b"\x00\x00") + "b"), "ab")
+
     def test_strip_markup_keeps_the_words(self):
         self.assertEqual(ph.strip_markup(tag(3, 0, b"\x0f\x00\x00") + tag(4, 0, b"\x03\x00Ab\x00") + "Hello there."),
                          "Hello there.")

@@ -171,7 +171,10 @@ player's game copies nothing.
   those are the game's markup. A tag is the byte 0x0e, then group, type and size (16-bit little-endian each), then
   `size` bytes of parameters; seen: a pause or colour (no or few bytes), a name (a length, the name, a 0 byte: an
   animation such as `Greeting`) and a variable (`Shop_SelectItemName`, `UI_MessageTargetActorName`), between the
-  words. `talk` cuts the tags out of a box's `text` and keeps the whole in `raw`.
+  words. `talk` cuts the tags out of a box's `text` and keeps the whole in `raw`. The page-break tag (group 0, type 4,
+  no bytes, seen in the Kokiri shop and Mido's text, 2026-11-24) becomes one space, so two pages are not glued into one
+  word. Not yet handled: a variable (an item name, a price) is cut with the markup and its words are missing from
+  `text`; read `raw` or `get_text` for those.
 - An exe without patch 0037 answers `hooked` false, and the module logs `coop: playtest: this Hookshot has no pane
   text wrap (patch 0037)` once at the HELLO.
 
