@@ -1327,7 +1327,7 @@ def run(a):
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
     say = Log(os.path.join(out, "steps.txt"), echo=print)
-    tags = ["A", "B"]
+    tags = [a.only] if getattr(a, "only", None) else ["A", "B"]   # --only: one game into a live session (live.py relaunch)
     games = {"A": os.path.abspath(a.game_a), "B": os.path.abspath(a.game_b)}
     kits = {"A": getattr(a, "kit_a", None), "B": getattr(a, "kit_b", None)}
     for x in tags:
@@ -1361,8 +1361,17 @@ def run(a):
         if not a.keep_open:
             return
         try:
+            pids = {"games": {x: p.pid for x, p in procs.items()}, "server": server.pid if server else None}
+            if getattr(a, "only", None):   # the session's other game and its server stay as they are
+                try:
+                    with open(os.path.join(out, "pids.json"), encoding="utf-8") as f:
+                        old = json.load(f)
+                except (OSError, ValueError):
+                    old = {}
+                pids = {"games": dict(old.get("games") or {}, **pids["games"]),
+                        "server": pids["server"] or old.get("server")}
             with open(os.path.join(out, "pids.json"), "w", encoding="utf-8") as f:
-                json.dump({"games": {x: p.pid for x, p in procs.items()}, "server": server.pid if server else None}, f)
+                json.dump(pids, f)
         except OSError as e:
             say("pids.json not written: %s" % e)
 
@@ -1390,7 +1399,7 @@ def run(a):
             open(commands[x], "w").close()
             env = dict(os.environ, OOT_COOP_KIT_START="1", HOS_CONTROL=sock, HOS_CONTROL_MEM="ro", LICHII_COOP_TEST_COMMANDS=commands[x])
             test_game_defaults(env)   # its own save, no crash ask on the title (TEST_GAME_DEFAULTS): a switch can undo it
-            if a.server or (a.host_in_game and x != "A"):
+            if a.server or getattr(a, "only", None) or (a.host_in_game and x != "A"):   # (--only: the session's server)
                 env["LICHII_COOP_SERVER"] = "127.0.0.1:%d" % a.port
                 env["LICHII_COOP_NAME"] = x   # "A", "B": the scripts type /teleport A, /teleport B
                 env["LICHII_COOP_PASSWORD"] = a.password
@@ -1400,7 +1409,7 @@ def run(a):
                 env.update(host_in_game_env(a.port, a.password))
             if a.playtest_ports:
                 # the play-test bridge (docs/playtest.md "Bridge protocol"): off unless its port is given
-                env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + i + 1)
+                env["LICHII_COOP_PLAYTEST_PORT"] = str(a.playtest_ports + "AB".index(x) + 1)   # (A p1, B p2, also --only)
                 env["LICHII_COOP_PLAYTEST_VERBS"] = "1"   # act, warp, flag, give: a player's game never gets this
                 env.setdefault("LICHII_COOP_CHEATS", "1")   # the bridge's give goes through the cheats queue
             for kv in a.env:
@@ -1613,12 +1622,15 @@ def main(argv=None):
                    help="the join password of the server it starts, given to both games (every session has one)")
     r.add_argument("--out", help="run folder (required without --lane; a lane: <its shots>/<name>/<time>)")
     r.add_argument("--name", default="scenario")
-    r.add_argument("--script-a", required=True)
+    r.add_argument("--script-a", help="(required without --only)")
     r.add_argument("--script-b")
     r.add_argument("--load", help="load.txt: checked only; the load presses A until the game plays")
     r.add_argument("--no-load", action="store_true")
     r.add_argument("--no-restore", action="store_true")
     r.add_argument("--keep-open", action="store_true")
+    r.add_argument("--only", choices=["A", "B"],
+                   help="start only this game, into a live session's folder (--out; live.py relaunch): its pids are "
+                        "added to the folder's pids.json")
     r.add_argument("--display", help="the monitor the game windows go to, by device name (default $%s, else %s): "
                                      "tools/autotest/placement.py" % (placement.ENV, placement.DEFAULT_DISPLAY))
     r.add_argument("--env", action="append", default=[], help="NAME=VALUE (or A:NAME=VALUE) for the games")
@@ -1666,6 +1678,8 @@ def main(argv=None):
     for kv in a.env:
         if "=" not in kv:
             p.error("--env NAME=VALUE")
+    if a.what == "run" and not a.script_a and not a.only:
+        p.error("--script-a (or --only B)")
     if getattr(a, "host_in_game", False):
         if a.server:
             p.error("--host-in-game hosts in game A: no --server")
