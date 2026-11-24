@@ -475,7 +475,7 @@ reload brought the fight back with no container to win (#241, row 52).
   `Dm_<Dungeon>_BossOut` and of the intro `Dm_<Dungeon>_BossIn`, and the dungeon quest's step after its last boss step
   (RSDB Challenge `IsBossBattle`). Left out: unsaved flags (`PhantomGanonPaintings_TemporaryDelete`) and the fight's
   own state (`CoopDungeon::NotShared`, which the stale-flag mend clears). The rooms' own logic reads exactly these
-  (`Logic/*_Level_Room_*`): Gohma's room `Gohma_DefeatBoss` and `Get_StoneOfForest_IsAfter_GoToWarpPoint_Exp`;
+  (`Logic/*_Level_Room_*`): Gohma's room makes the warp from `Gohma_DefeatBoss` and takes Gohma out from the shared quest (`Get_StoneOfForest_IsAfter_DefeatBoss_Exp`), not from that Bool; `Get_StoneOfForest_IsAfter_GoToWarpPoint_Exp` is read too;
   Dodongo's `HavePlayedEvent.Dm_DodongoCave_BossOut` and `Enemy_DungeonBoss_Dodongo_BossAppear`; Volvagia's
   `Enemy_DungeonBoss_Volvagia_BossAppear`, `HavePlayedEvent.Dm_FireTemple_BossIn` and `SageOfFire_IsAfter_DefeatBoss_Exp`;
   the other five their quest's `IsAfter_<step>_Exp`.

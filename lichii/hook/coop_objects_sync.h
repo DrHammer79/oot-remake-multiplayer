@@ -1288,6 +1288,13 @@ public:
     std::vector<std::string> TakeNotes() { return std::exchange(notes_, {}); }
     // Row 211: the makers of the rally balls in this walk (RallyMakers), for the next Tick's AttackWithRally.
     void SetRallyMakers(std::vector<std::string_view> makers) { rally_makers_ = std::move(makers); }
+    // Row 63 (Gold Skulltulas Shared): placed Gold Skulltulas whose owner said they died, since the last
+    // call, with where our copy was: the world sync owes this game their tokens (WorldSync::OweToken).
+    struct GoldDeath {
+        std::uint64_t placement = 0;
+        coop::protocol::Vec3 at{};
+    };
+    std::vector<GoldDeath> TakeGoldDeaths() { return std::exchange(gold_deaths_, {}); }
     std::optional<coop::protocol::ObjectId> IdOf(std::uint64_t address) const;
     // Difficulty's night horde (coop_difficulty.h Horde): how many players'
     // Links stand within kRollNearM of `at`, we among them: the others in our
@@ -1728,6 +1735,7 @@ private:
     std::set<coop::protocol::ObjectId> copy_killed_;
     // Gold Skulltula placements taken (GoldTaken), this scene.
     std::set<std::uint64_t> gold_taken_;
+    std::vector<GoldDeath> gold_deaths_;
     void HoldEncounters(std::uint64_t now_us);
     std::map<std::uint64_t, std::uint64_t> bound_;  // actor to director key
     std::uint64_t next_key_ = 1;

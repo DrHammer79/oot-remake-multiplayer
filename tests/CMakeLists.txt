@@ -59,6 +59,8 @@ add_executable(coop_tests
   lichii/life_gauge_test.cpp
   lichii/rooms_test.cpp
   lichii/objects_test.cpp
+  lichii/objects_world_test.cpp
+  lichii/strike_test.cpp
   lichii/bomb_share_test.cpp
   lichii/lift_player_test.cpp
   lichii/show_delay_test.cpp
@@ -127,6 +129,7 @@ add_executable(coop_tests
   lichii/shared_scenes_test.cpp
   lichii/scrubs_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_scrubs.cpp
   lichii/cheat_items_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_cheat_items.cpp
+  lichii/cheat_give_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_cheat_give.cpp
   # These hook files have no emulator code, so they are tested on their own.
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_beaten.cpp
@@ -183,6 +186,7 @@ add_executable(coop_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_dbno.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_difficulty.cpp
   lichii/mod_share_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_mod_share.cpp
+  lichii/gold_mode_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_gold_mode.cpp
   lichii/pack_notice_test.cpp
   lichii/name_privacy_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_name_privacy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_time_sync.cpp
@@ -205,7 +209,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/title_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_title_menu.cpp
   hookshot/pause_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_pause_menu.cpp
   hookshot/chat_commands_test.cpp
-  hookshot/original_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_original.cpp
+  test_temp_test.cpp hookshot/original_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_original.cpp
   hookshot/host_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_host_menu.cpp
   hookshot/input_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_input.cpp
   hookshot/mods_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_mod_json.cpp
@@ -220,7 +224,9 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_parts.cpp
   hookshot/look_menu_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_menu.cpp
   hookshot/snail_custom_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_snail_custom.cpp
-  hookshot/look_view_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_view.cpp
+  hookshot/menu_state_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_menu_state.cpp
+  hookshot/look_view_test.cpp
+  hookshot/look_steer_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_view.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_look_tunic.cpp
   hookshot/texture_override_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_texture.c
   hookshot/lobby_tab_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_lobby_tab.cpp
@@ -233,6 +239,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/auto_rejoin_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_auto_rejoin.cpp
   hookshot/lan_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_lan.cpp
   hookshot/playtest_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_playtest_core.cpp
+  hookshot/talk_text_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_talk_text.cpp
   hookshot/browse_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_browse.cpp
   hookshot/longshot_settings_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_longshot_settings.cpp
   hookshot/pad_order_test.cpp

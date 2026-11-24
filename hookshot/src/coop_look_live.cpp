@@ -983,6 +983,7 @@ namespace {
 std::mutex g_mutex;
 Orbit g_orbit;   // guarded
 Watch g_watch;   // guarded
+Steer g_steer;   // guarded (patch 0040: the game's camera turned with the orbit)
 std::mutex g_keep_mutex;   // (its own: OwnLink runs outside g_mutex)
 Keep g_keep;               // guarded by g_keep_mutex
 
@@ -1062,21 +1063,59 @@ bool Camera(double eye[3], double target[3]) {
         std::lock_guard lock(g_mutex);
         if (!g_orbit.Asked(now)) {
             g_orbit.Camera({}, {}, std::nullopt, now);   // (ends a turn)
+            g_steer.Want(std::nullopt);
             return false;
         }
     }
     const auto link = OwnLink();   // (outside the lock: the hook's own lock)
     const double fov = GameFov();
     std::lock_guard lock(g_mutex);
-    const auto shot = g_orbit.Camera({eye[0], eye[1], eye[2]}, {target[0], target[1], target[2]}, link, now, fov);
-    if (!shot) {
+    const Vec3 game_eye{eye[0], eye[1], eye[2]};
+    const Vec3 game_target{target[0], target[1], target[2]};
+    const auto aim = g_orbit.Camera(game_eye, game_target, link, now, fov);
+    if (!aim || !link) {
+        g_steer.Want(std::nullopt);
         return false;
     }
+    // The game's camera turned with the orbit (patch 0040): its own eye, placed by its collision, kept and aimed at
+    // Link. Otherwise (no patch 0040, the probe, a camera that does not follow): Aim's shot.
+    g_steer.Observe(game_eye, game_target);
+    std::optional<Shot> shot;
+    if (g_steer.Driving()) {
+        shot = Framed(game_eye, game_target, *aim, *link, g_orbit.window(), g_steer.FreeDistance(), fov);
+    }
+    if (!shot) {
+        shot = aim;
+    }
+    g_steer.Want(DirectionOf(game_target, aim->eye),
+                 std::hypot(aim->eye[0] - game_target[0], aim->eye[1] - game_target[1], aim->eye[2] - game_target[2]));
     g_watch.Framed(now);
     for (int i = 0; i < 3; ++i) {
         eye[i] = shot->eye[i];
         target[i] = shot->target[i];
     }
+    return true;
+}
+
+bool Turn(float* yaw, float* pitch, int state, bool coop_on) {
+    if (yaw == nullptr || pitch == nullptr) {
+        return false;
+    }
+    std::optional<Angles> angles;
+    std::optional<std::string> note;
+    {
+        std::lock_guard lock(g_mutex);
+        angles = g_steer.Command({*yaw, *pitch}, state, coop_on && g_orbit.Asked(NowMs()));
+        note = g_steer.TakeNote();
+    }
+    if (note) {
+        LOG_INFO(Core, "{}", *note);
+    }
+    if (!angles) {
+        return false;
+    }
+    *yaw = angles->yaw;
+    *pitch = angles->pitch;
     return true;
 }
 

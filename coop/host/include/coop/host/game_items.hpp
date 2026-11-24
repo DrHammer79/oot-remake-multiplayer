@@ -92,11 +92,20 @@ std::uint32_t merge_item(ItemRule rule, protocol::FlagKind kind, std::uint32_t l
 // count raised only by a Skulltula's token. Taking the token sets the 64-bit
 // key of that Skulltula's placement (Enemy_Skulltula_Gold) in the same scan.
 inline constexpr std::uint32_t kGoldTokenCount = 0x04735978;
+// IsGet.Item_Token_Gold (item_flags): the first token's get flag.
+inline constexpr std::uint32_t kGoldTokenGet = 0x6ba394fe;
 // The placement keys of all 100 Gold Skulltulas (the Enemy_Skulltula_Gold
 // placements of every map, Child and Adult the same key; each key is in the
 // game's key list), sorted. The hook shares them all from the start and
 // guards the token count with them (FlagWatcher::guard_count).
 std::span<const std::uint64_t> gold_skulltula_keys();
+// Gold Skulltulas Not shared (row 63, review-01112-h): everything of the Gold Skulltulas is each racer's own, so
+// beside the Skulltulas' keys, the token count and its IsGet each racer keeps these named flags (Bool or Int): the
+// Skulltula House's five rewards (KakarikoVillage_GatheringTokenGold_GetReward10..50, each racer claims its own)
+// and what only those rewards give: the wallet tiers (rewards 10 and 30; PouchData.Item_Wallet_*.StockNum and
+// IsGet.Item_Wallet_*, the row 272 wallet family's units) and the Stone of Agony (20; IsGet and StockNum). The 40
+// (bombchus) and 50 (a heart piece) give items other places give too: those items stay the group's.
+std::span<const std::uint32_t> gold_race_flags();
 
 // What the game gives with an item, besides the item itself: the ammo
 // capacity (Int struct 0xf80f8077, one member per ammo) and the ammo it

@@ -50,6 +50,8 @@
 
 #include "coop_objects.h"
 #include "coop_life_gauge.h"
+#include "coop_strike.h"
+#include "coop_gold_mode.h"
 #include "coop_caller_orders.h"
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
@@ -129,6 +131,7 @@
 #include "coop_scrubs.h"
 #include "coop_event_member.h"
 #include "coop_event_owner.h"
+#include "coop_world_snapshot.h"
 #include <set>
 
 namespace CoopObjects {
@@ -188,6 +191,10 @@ constexpr u64 kEnemyKey = u64{1} << 63;
 constexpr u64 kExtraKey = kEnemyKey | u64{1} << 62;
 // Difficulty's night horde (coop_difficulty.h Horde): its own keys on the same list.
 constexpr u64 kHordeKey = kEnemyKey | u64{1} << 61;
+// Row 63: a Gold Skulltula's token another game's kill owes ours (CoopWorld::WorldSync::OweToken): its own keys
+// there, the placement's low 60 bits.
+constexpr u64 kTokenKey = kEnemyKey | u64{1} << 60;
+constexpr u64 kTokenKeyMask = (u64{1} << 60) - 1;
 constexpr int kMoverCallerOrder = CoopCallerOrders::kMover;  // after the puppets, spawn copies (10) and fairies (20)
 constexpr int kGrassCallerOrder = CoopCallerOrders::kGrass;  // the others' field grass cuts (coop_world.h)
 
@@ -435,6 +442,8 @@ bool& ForgetKeptFlag() {  // a host save load: WorldSync::ForgetKept before the 
 struct TestStrike {
     std::string name;
     std::int32_t amount = 0;  // 0: a kill (its whole life); -1: a stun (TestStun)
+    std::uint64_t id = 0;     // the actor's address when the strike names one (0: the nearest of the name)
+    std::uint64_t seq = 0;    // CoopStrike::Book number; 0: a stun (no result is kept)
 };
 struct TestPlatformPlaces {  // TestPlatformPlace: the last walk's moving platforms nearest our Link, by name
     std::mutex mutex;
@@ -618,8 +627,8 @@ public:
         std::lock_guard lock(mutex_);
         aim_ = Aim{target, until_ms};
     }
-    // The walk: a NormalArrow first seen (ours, nocked: another player's is a CoopShot_Arrow stand-in), taken
-    // while an aim waits for one.
+    // The walk: a NormalArrow or a Shootable_DekuSeed first seen (ours: another player's is a CoopShot_ stand-in),
+    // taken while an aim waits for one (CoopTestInput::Aimable).
     void AimArrow(u64 actor, const std::array<float, 3>& at) {
         std::lock_guard lock(mutex_);
         if (aim_ && aim_->arrow == 0) {
@@ -2071,8 +2080,16 @@ public:
                 CoopBossOrders::TheTable().Publish({});  // row 222: no owner or copy: our managers decide again
                 sharing_ = false;
             }
+            if (CoopWorldSnapshot::TheStore().Enabled() && scene && !scene->empty() && Ready(system)) {
+                SoloWorld(system);  // the play-test bridge's world list in solo play (off: the one atomic load)
+            } else if (!solo_names_.empty()) {
+                solo_names_.clear();
+                solo_stamps_.clear();
+            }
             return;
         }
+        solo_names_.clear();  // (a session walks with its own cache)
+        solo_stamps_.clear();
         if (!Ready(system)) {
             return;
         }
@@ -2460,6 +2477,7 @@ public:
             }
             PlanExtras(*scene, seen, enemies);
             PlanHorde(*scene, self, server_now_us, seen, enemies);
+            PlanTokens(enemies);
             CoopSpawn::TheDirector().SetEnemies(main_, std::move(enemies));
         }
         for (const auto& note : sync_.TakeNotes()) {
@@ -2492,7 +2510,13 @@ public:
             // of a hammer switch or the box puzzle's last corner would raise our own asker's trigger here (a replay
             // that binds our Link): those world objects follow only once our game has played the event.
             world_.SetTriggerKeepers(TriggerFollowKeepers(system, *scene));
+            for (const auto& d : sync_.TakeGoldDeaths()) {
+                world_.OweToken(d.placement, d.at, server_now_us);  // row 63: the token comes from the share
+            }
             world_.Tick(*scene, self, server_now_us, seen, player_, world);
+            for (const u64 placement : world.token_keys) {
+                CoopWorld::QueueTokenKeys(placement);
+            }
             for (auto& m : world.send) {
                 send.emplace_back(std::move(m));
             }
@@ -3069,6 +3093,14 @@ public:
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
     std::vector<CoopScrubs::Seen> scrubs_seen_;
+    // This walk's own-game mobs (CoopStrike::OwnGameMob): not shared, so not in `seen`, but a test kill may kill them.
+    struct OwnMob {
+        u64 address = 0;
+        std::string name;
+        std::array<float, 3> position{};
+        std::optional<s32> life;
+    };
+    std::vector<OwnMob> own_mobs_;
     bool ocarina_probe_on_ = false;           // issue 152: LICHII_COOP_OCARINA_PROBE=1
     CoopOcarina::OcarinaProbe ocarina_probe_;
     CoopOcarina::HoldProbe ocarina_hold_probe_;
@@ -3651,6 +3683,99 @@ private:
         }
     }
 
+    // The play-test bridge's snapshot of the world (coop_world_snapshot.h): every actor of the walk with its place,
+    // and for the enemies their life; the nearest kept. The callers take it every 100 ms at most (world_every_);
+    // `frame` is the bridge's game frame read before the walk began (a frame the actors may have moved past, never one
+    // they have not reached). `names`: the walk's actors and names (names_, or solo_names_ in solo play).
+    void PublishWorld(Reader& r, const std::optional<coop::protocol::Vec3>& player, u64 frame,
+                      const std::unordered_map<u64, std::pair<std::string, u64>>& names, bool solo = false) {
+        const auto began = std::chrono::steady_clock::now();
+        std::vector<CoopWorldSnapshot::Candidate> in;
+        in.reserve(names.size());
+        for (const auto& [a, known] : names) {
+            const auto at = r.Get<std::array<float, 3>>(a + kActorPosition);
+            if (!at) {
+                continue;
+            }
+            CoopWorldSnapshot::Candidate c;
+            c.id = a;
+            c.name = &known.first;
+            c.pos = *at;
+            if (CoopWorldSnapshot::KindOf(known.first) == CoopWorldSnapshot::Kind::enemy) {
+                if (const auto value = LifeValue(r, a)) {
+                    c.life = r.Get<s32>(value->first + 8);
+                    c.max_life = r.Get<s32>(value->second + 8);
+                }
+            }
+            if (const auto owner = sync_.OwnerOf(a)) {
+                c.owner = *owner;
+            }
+            in.push_back(std::move(c));
+        }
+        std::optional<std::array<float, 3>> from;
+        if (player) {
+            from = std::array<float, 3>{(*player)[0], (*player)[1], (*player)[2]};
+        }
+        CoopWorldSnapshot::Snapshot snap;
+        snap.actors = CoopWorldSnapshot::Select(in, from, CoopWorldSnapshot::kLimit);
+        snap.frame = frame;
+        snap.solo = solo;
+        snap.taken_ms = SteadyNowMs();
+        snap.cost_us = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - began).count());
+        CoopWorldSnapshot::TheStore().Put(std::move(snap));
+    }
+    CoopEvery::Every world_every_{100'000};
+
+    // The play-test bridge's world list in solo play: with no session the sharing walk (Collect) does not run, so
+    // this light walk lists the actors by name and place for PublishWorld and nothing else (no sharing state is read
+    // or kept; a session's first walk starts from its own empty cache). Names are cached by the walk's ActorStamp.
+    // Our new arrow or seed is handed to a waiting test `aim` here too.
+    void SoloWorld(Core::System& system) {
+        if (!world_every_.Due(CoopEvery::NowUs())) {
+            return;
+        }
+        const u64 frame = CoopWorldSnapshot::TheStore().Frame();
+        Reader r(system.ApplicationMemory());
+        std::vector<u64> actors;
+        if (!List(r, actors)) {
+            return;
+        }
+        std::unordered_map<u64, std::pair<std::string, u64>> names;
+        std::unordered_map<u64, ActorStamp> stamps;
+        std::optional<coop::protocol::Vec3> player;
+        for (const u64 a : actors) {
+            const u64 name_at = r.Ptr(a + kActorName).value_or(0);
+            const ActorStamp stamp{name_at, name_at ? r.Get<u64>(name_at).value_or(0) : 0,
+                                   r.Ptr(a + kActorPlacement).value_or(0)};
+            std::pair<std::string, u64> known;
+            const auto it = solo_names_.find(a);
+            const auto was = solo_stamps_.find(a);
+            if (it != solo_names_.end() && was != solo_stamps_.end() && was->second == stamp) {
+                known = std::move(it->second);
+            } else {
+                known.first = r.Name(a);
+                if (CoopTestInput::Aimable(known.first)) {
+                    if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                        TheMover().AimArrow(a, *at);
+                    }
+                }
+            }
+            if (known.first == "Player_Child" || known.first == "Player_Adult") {
+                if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
+                    player = coop::protocol::Vec3{(*at)[0], (*at)[1], (*at)[2]};
+                }
+            }
+            stamps.emplace(a, stamp);
+            names.emplace(a, std::move(known));
+        }
+        solo_names_ = std::move(names);
+        solo_stamps_ = std::move(stamps);
+        PublishWorld(r, player, frame, solo_names_, true);
+    }
+    std::unordered_map<u64, std::pair<std::string, u64>> solo_names_;  // SoloWorld's cache (solo play only)
+    std::unordered_map<u64, ActorStamp> solo_stamps_;
+
     // An enemy or a boss: its life is never written (the native rule), only changed by its game's own steps.
     bool NativeOnly(u64 actor) const {
         return NativeOnlyName(NameOf(actor));
@@ -4117,6 +4242,7 @@ private:
         share_switches_.clear();  // room-objects
         platform_drivers_.clear();
         scrubs_seen_.clear();  // issue 149
+        own_mobs_.clear();
         std::vector<u64> actors;
         if (!List(r, actors)) {
             return false;
@@ -4211,6 +4337,7 @@ private:
         }
         const u64 now_ms = SteadyNowMs();
         std::vector<std::string> rally_balls;  // row 211: the boss balls a sword sends back, alive in this walk
+        const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
             // walk between (our adult Link where the last scene's TerrainScenePermanent was): the cached name
@@ -4231,7 +4358,7 @@ private:
                 const auto placement = r.Ptr(a + kActorPlacement);
                 known.second = placement ? r.Get<u64>(*placement + kPlacementHash).value_or(0) : 0;
                 CoopPickups::Note(known.first, known.second);  // one-time pickups (docs/items.md)
-                if (known.first == "NormalArrow") {  // test only (`aim`): a new arrow of ours
+                if (CoopTestInput::Aimable(known.first)) {  // test only (`aim`): a new arrow or seed of ours
                     if (const auto at = r.Get<std::array<float, 3>>(a + kActorPosition)) {
                         TheMover().AimArrow(a, *at);
                     }
@@ -4445,6 +4572,18 @@ private:
                 }
                 gimmicks_.push_back(std::move(g));
             }
+            if (CoopStrike::OwnGameMob(known.first, CoopGoldMode::NotShared())) {
+                OwnMob m;
+                m.address = a;
+                m.name = known.first;
+                for (std::size_t i = 0; i < 3; ++i) {
+                    m.position[i] = r.Get<float>(a + kActorPosition + 4 * i).value_or(0.0f);
+                }
+                if (const auto v = LifeValue(r, a)) {
+                    m.life = r.Get<s32>(v->first + 8);
+                }
+                own_mobs_.push_back(std::move(m));
+            }
             if (!extra_unbound &&
                 (IsShared(known.first) || CoopWorld::IsWorldObject(known.first) ||
                  CoopWorld::IsBlockAnchor(known.first) ||  // moved with its block (issue 147)
@@ -4599,6 +4738,10 @@ private:
         }
         names_ = std::move(names);
         NoteFallingRocks();  // row 234: Volvagia's rocks, per game
+        if (CoopWorldSnapshot::TheStore().Enabled() &&  // the play-test bridge's world (off: this one atomic load)
+            world_every_.Due(CoopEvery::NowUs())) {
+            PublishWorld(r, player, world_frame, names_);
+        }
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
@@ -5104,6 +5247,37 @@ private:
         }
     }
 
+    // Row 63, Gold Skulltulas Shared: the tokens the world sync owes our game (another game's kill, ours
+    // made none), made by the game's own create where its Skulltula's copy was, then let go like a drop.
+    void PlanTokens(std::vector<CoopSpawn::Copy>& enemies) {
+        const auto made = world_.MadeTokens();
+        if (made.empty()) {
+            return;
+        }
+        for (const auto& [key, actor] : CoopSpawn::TheDirector().Live()) {
+            if ((key & ~kTokenKeyMask) != kTokenKey) {
+                continue;
+            }
+            for (const auto& t : made) {
+                if ((t.placement & kTokenKeyMask) == (key & kTokenKeyMask) && t.actor == 0) {
+                    world_.BindMadeToken(t.placement, actor);
+                    LOG_INFO(Core, "coop: world: token {:016x} made here by the share", t.placement);
+                }
+            }
+        }
+        for (const auto& t : world_.MadeTokens()) {
+            CoopSpawn::Copy c;
+            c.key = kTokenKey | (t.placement & kTokenKeyMask);
+            c.actor = "Obj_Token_Gold";
+            c.position = t.at;
+            c.act = t.actor != 0 ? CoopSpawn::Act::release : CoopSpawn::Act::show;
+            c.place = true;   // where the Skulltula's copy was; let go once made
+            c.remakes = 0;    // one taken is not made again
+            c.real = true;    // the game's own token: its pickup is the game's
+            enemies.push_back(std::move(c));
+        }
+    }
+
     // Difficulty (coop_difficulty.h Horde): more night Stalchild beside the
     // rolls this game keeps and shares, the more players stand near each.
     void PlanHorde(const std::string& scene, std::uint8_t self, u64 server_now_us, const std::vector<Seen>& seen,
@@ -5208,28 +5382,50 @@ private:
                          sync_.TestStun(name, player_, self) ? "said" : "not a copy (none here, or ours)");
                 continue;
             }
-            const Seen* best = nullptr;
-            float best_m = 0.0f;
+            // The walk's own list, not the snapshot the bridge shows: a strike with an id lands on that actor or on
+            // none (CoopStrike::PickTarget), and what happened is kept for the bridge's `state.strike`.
+            std::vector<CoopStrike::Candidate> candidates;
+            candidates.reserve(seen.size());
             for (const Seen& s : seen) {
-                if (s.name != name || !s.life || s.life->life <= 0) {
-                    continue;
+                CoopStrike::Candidate c;
+                c.address = s.address;
+                c.name = s.name;
+                if (s.life) {
+                    c.life = s.life->life;
                 }
-                float m = 0.0f;
                 if (player_) {
                     const float dx = s.position[0] - (*player_)[0];
                     const float dy = s.position[1] - (*player_)[1];
                     const float dz = s.position[2] - (*player_)[2];
-                    m = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    c.metres = std::sqrt(dx * dx + dy * dy + dz * dz);
                 }
-                if (!best || m < best_m) {
-                    best = &s;
-                    best_m = m;
+                candidates.push_back(c);
+            }
+            // What the world list shows (names_, set by this walk's Collect) but the walk does not share is told apart
+            // from an actor that is gone.
+            std::vector<CoopStrike::Listed> listed;
+            if (strike.id != 0) {
+                if (const auto at = names_.find(strike.id); at != names_.end()) {
+                    listed.push_back({strike.id, at->second.first});
                 }
             }
-            if (!best) {
-                LOG_INFO(Core, "coop: test {} {}: none here with a life", strike.amount > 0 ? "hit" : "kill", name);
+            const CoopStrike::Pick pick = CoopStrike::PickTarget(candidates, name, strike.id, listed);
+            if (pick.result != CoopStrike::kDone && strike.amount == 0 && KillOwnMob(strike, writes)) {
                 continue;
             }
+            if (strike.seq != 0) {
+                CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), name, strike.id});
+            }
+            if (pick.result != CoopStrike::kDone) {
+                LOG_INFO(Core, "coop: test {} {}{}: {}", strike.amount > 0 ? "hit" : "kill",
+                         strike.id ? fmt::format("{} ", strike.id) : std::string(), name,
+                         pick.result == CoopStrike::kGone       ? "gone (no such actor with that name)"
+                         : pick.result == CoopStrike::kNotShared ? "not shared (it is here, co-op does not share it)"
+                                                                 : "none here with a life");
+                continue;
+            }
+            const Seen* best = &seen[pick.index];
+            const float best_m = candidates[pick.index].metres;
             if (strike.amount > 0) {
                 // A partial hit: through the game's own Life step, never past its stops (no test_kill).
                 LifeWrite w;
@@ -5257,6 +5453,43 @@ private:
                      name, best->address, best->position[0], best->position[1], best->position[2],
                      best_m, best->life->life);
         }
+    }
+
+    // A test kill the shared list could not land, on this game's own mobs (a Not shared Gold Skulltula): written
+    // straight to its Life, in this game only; its death and token are this game's own (nothing is sent).
+    bool KillOwnMob(const TestStrike& strike, std::vector<LifeWrite>& writes) {
+        std::vector<CoopStrike::Candidate> mobs;
+        for (const OwnMob& m : own_mobs_) {
+            CoopStrike::Candidate c;
+            c.address = m.address;
+            c.name = m.name;
+            c.life = m.life;
+            if (player_) {
+                const float dx = m.position[0] - (*player_)[0];
+                const float dy = m.position[1] - (*player_)[1];
+                const float dz = m.position[2] - (*player_)[2];
+                c.metres = std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            mobs.push_back(c);
+        }
+        const CoopStrike::Pick pick = CoopStrike::PickTarget(mobs, strike.name, strike.id);
+        if (pick.result != CoopStrike::kDone) return false;
+        if (strike.seq != 0) {
+            CoopStrike::TheBook().Record({strike.seq, std::string(pick.result), strike.name, strike.id});
+        }
+        const OwnMob& m = own_mobs_[pick.index];
+        LifeWrite w;
+        w.address = m.address;
+        w.life = 0;
+        w.hurt = std::max<std::int32_t>(*m.life, 1);
+        w.from = player_;
+        w.direct = true;
+        w.test_kill = true;
+        writes.push_back(w);
+        LOG_INFO(Core, "coop: test kill {} {:#x} at {:.2f} {:.2f} {:.2f} ({:.1f} m, life {}): hit, this game's own "
+                       "(not shared)", m.name, m.address, m.position[0], m.position[1], m.position[2],
+                 mobs[pick.index].metres, *m.life);
+        return true;
     }
 
     void WriteLife(Core::Memory::Memory& memory, Reader& r, const LifeWrite& w) {
@@ -6616,24 +6849,30 @@ void QueueTestDrop(std::string name, float metres) {
     }
 }
 
-void QueueTestKill(std::string name) {
+std::uint64_t QueueTestKill(std::string name, std::uint64_t id) {
     std::lock_guard lock(KeyRefundMutex());
-    if (TestKillQueue().size() < 16) {
-        TestKillQueue().push_back({std::move(name), 0});
+    if (TestKillQueue().size() >= 16) {
+        return 0;
     }
+    const std::uint64_t seq = CoopStrike::TheBook().Asked();
+    TestKillQueue().push_back({std::move(name), 0, id, seq});
+    return seq;
 }
 
-void QueueTestHit(std::string name, std::int32_t amount) {
+std::uint64_t QueueTestHit(std::string name, std::int32_t amount, std::uint64_t id) {
     std::lock_guard lock(KeyRefundMutex());
-    if (TestKillQueue().size() < 16 && amount > 0) {
-        TestKillQueue().push_back({std::move(name), amount});
+    if (TestKillQueue().size() >= 16 || amount <= 0) {
+        return 0;
     }
+    const std::uint64_t seq = CoopStrike::TheBook().Asked();
+    TestKillQueue().push_back({std::move(name), amount, id, seq});
+    return seq;
 }
 
 void QueueTestStun(std::string name) {
     std::lock_guard lock(KeyRefundMutex());
     if (TestKillQueue().size() < 16) {
-        TestKillQueue().push_back({std::move(name), -1});
+        TestKillQueue().push_back({std::move(name), -1, 0, 0});
     }
 }
 

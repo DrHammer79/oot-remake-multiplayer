@@ -44,6 +44,9 @@ inline constexpr const char* kCustomizeHelp =
     "A colour for each part of your tunics, shields, swords, boots and gauntlets, with a picture. Your Link wears it "
     "when you close the menu.";
 inline constexpr const char* kCommandsHelp = "The chat's commands, and the key that opens the chat.";
+// The word the play-test bridge's `menu` state member shows for a page (docs/playtest.md): "main", "host", "join",
+// "local", "settings", "commands", "customize", "find".
+const char* PageWord(Page page);
 // The key that opens the chat box, in words, from LICHII_COOP_CHAT_KEY ("T"
 // by default; "off": none).
 std::string ChatKeyWords(const std::string& chat_key);
@@ -137,6 +140,7 @@ struct Session {
     // of Co-op settings; `rules` false: not heard yet (not in a session), the rows show what the next Host uses.
     bool rules = false;
     bool pvp = false;
+    bool gold_own = false;   // Gold Skulltulas not shared in this session (CoopGoldMode::InForce)
     bool dbno = true;
     int dbno_bleed_s = 45, dbno_revive_tenths = 50, dbno_revive_life = 12;
 
@@ -309,7 +313,7 @@ private:
         kOpenCustomize, kNgPlus, kSaveSet,
         kOpenFind, kFindList, kFindSearch, kFindGame, kFindFilter, kFindSort, kFindRefresh, kFindPage,
         kShowPassword, kNewPassword, kLetIn, kRefuse, kListRoom, kAutoRejoin, kOriginal,
-        kApproveJoins, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
+        kApproveJoins, kGoldSkulltulas, kPvp, kDbno, kDbnoTime, kDbnoHold, kDbnoHearts,
         kDifficulty, kDifficultyLife, kDifficultyDamage, kDifficultyCount,
         kCharAges, kCharChild, kCharAdult
     };

@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include <map>
+#include <memory>
 #include <string_view>
 #include <set>
 #include <string>
@@ -3996,6 +3997,41 @@ TEST_CASE("heart containers: only a shared named flag, and the item store takes 
   CHECK(game_store.get(kHeartMax) == 16u);
 }
 
+// Row 63, Gold Skulltulas Not shared (coop_gold_mode.h): the keys, the count and its IsGet stay in each game.
+TEST_CASE("keep local: a Skulltula's key and the token count are never sent, nor written from a message") {
+  TokenStore store = token_game();
+  FlagWatcher w(token_shared(), FlagRole::player);
+  w.set_learn_pickups(true);
+  guard(w);
+  const FlagKey local[] = {kSkull, kSkull2, kTokens};
+  CHECK(w.keep_local(local) == 3);
+  CHECK_FALSE(w.shared().contains(kSkull));
+  CHECK_FALSE(w.shared().contains(kTokens));
+  CHECK(w.shared().contains(kChest));  // the rest is shared as before
+  CHECK(w.kept_local(kSkull));
+  w.frame(store);
+
+  // Our pickup: nothing about it goes out, and our count stays ours.
+  store.set(kSkull, 1);
+  store.tokens(6);
+  CHECK(entries(w.frame(store)).empty());
+  CHECK(run_hold(w, store).empty());
+  CHECK(store.tokens() == 6);
+
+  // Another game's pickup (a host from before, or a message on its way): not written here.
+  w.receive(state({entry(kSkull2, 1), token_total(9)}));
+  w.frame(store);
+  CHECK(store.values.at(kSkull2).value == 0);
+  CHECK(store.tokens() == 6);
+
+  // Never shared again: not by the guard, a pickup note, or learning.
+  guard(w);
+  CHECK_FALSE(w.share_pickup(kSkull));
+  CHECK_FALSE(w.shared().contains(kSkull));
+  CHECK_FALSE(w.shared().contains(kSkull2));
+  CHECK(w.pickups() == 0);
+}
+
 // Row 272: a once-per-save reward (a bottle) got in two games at once.
 namespace {
 
@@ -4298,4 +4334,64 @@ TEST_CASE("reward guard: a scrub's stick upgrade and a Skulltula wallet at once 
   CHECK(has(sent, entry(kWalletM, 1)));
   CHECK(store.get(kWalletM) == 1);
   CHECK(w.stats().rewards_guarded == 0);
+}
+
+TEST_CASE("keep local: two Not shared racers each reach 10 tokens: each claims its own reward and wallet (review-01112-h)") {
+  // The Skulltula House's 10-token reward and the wallet tier it gives, guarded for the group (row 272) while
+  // Shared; Not shared keeps both in each game (coop::host::gold_race_flags), so the guard never judges them.
+  constexpr FlagKey kReward10{0x9001u, 0};  // KakarikoVillage_GatheringTokenGold_GetReward10
+  constexpr FlagKey kReward30{0x9002u, 0};  // ..._GetReward30
+  constexpr FlagKey kWalletS{0x9100u, 0}, kWalletSGot{0x9101u, 0};
+  constexpr FlagKey kWalletM{0x9200u, 0}, kWalletMGot{0x9201u, 0};
+  const auto racer = [&] {
+    FakeStore store;
+    for (FlagKey k : {kReward10, kReward30, kWalletS, kWalletSGot, kWalletM, kWalletMGot}) store.set(k, 0);
+    return store;
+  };
+  const auto watcher = [&](FlagRole role) {
+    auto w = std::make_unique<FlagWatcher>(SharedFlags({kWalletS, kWalletSGot, kWalletM, kWalletMGot}), role);
+    const std::vector<std::vector<FlagKey>> wallets{{kWalletS, kWalletSGot}, {kWalletM, kWalletMGot}};
+    const FlagKey sources[] = {kReward10, kReward30};
+    w->guard_reward(wallets, sources);
+    const FlagKey local[] = {kReward10, kReward30, kWalletS, kWalletSGot, kWalletM, kWalletMGot};
+    CHECK(w->keep_local(local) == 6);   // the four wallet keys and the two Bools the guard shared
+    return w;
+  };
+  FakeStore a = racer(), b = racer();
+  auto wa = watcher(FlagRole::host);
+  auto wb = watcher(FlagRole::player);
+  for (FlagKey k : {kReward10, kReward30, kWalletS, kWalletSGot, kWalletM, kWalletMGot}) {
+    CHECK(wa->kept_local(k));
+    CHECK_FALSE(wa->shared().contains(k));
+  }
+  for (int f = 0; f < 2; ++f) {
+    wa->frame(a);
+    wb->frame(b);
+  }
+  // A reaches 10 first: its own reward and its own wallet, nothing of it sent.
+  a.set(kReward10, 1);
+  a.set(kWalletS, 1);
+  a.set(kWalletSGot, 1);
+  CHECK(entries(wa->frame(a)).empty());
+  // B reaches 10 a moment later (inside the guard's time): its own, never put back as a second copy.
+  b.set(kReward10, 1);
+  b.set(kWalletS, 1);
+  b.set(kWalletSGot, 1);
+  CHECK(entries(wb->frame(b)).empty());
+  CHECK(b.get(kWalletS) == 1);
+  CHECK(b.get(kReward10) == 1);
+  CHECK(wb->stats().rewards_guarded == 0);
+  // A host from before that still sends them: not written here (B's reward 30 stays B's to claim).
+  wb->receive(proto::FlagState{1, {entry(kReward30, 1), entry(kWalletM, 1), entry(kWalletMGot, 1)}});
+  wb->frame(b);
+  CHECK(b.get(kReward30) == 0);
+  CHECK(b.get(kWalletM) == 0);
+  // Each wallet is its racer's: A's next tier is not B's.
+  a.set(kReward30, 1);
+  a.set(kWalletM, 1);
+  a.set(kWalletMGot, 1);
+  CHECK(entries(wa->frame(a)).empty());
+  CHECK(b.get(kWalletM) == 0);
+  CHECK(wa->stats().rewards_guarded == 0);
+  CHECK(wb->take_rewards_guarded().empty());
 }

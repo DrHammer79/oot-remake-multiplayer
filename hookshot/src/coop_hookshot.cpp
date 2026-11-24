@@ -41,6 +41,7 @@
 #include "coop_cheats_panel.h"
 #include "coop_debug_panels.h"
 #include "coop_playtest.h"
+#include "coop_talk_text.h"
 #include "coop_char_colours.h"
 #include "coop_gear_params.h"
 #include "coop_chatbox.h"
@@ -129,9 +130,11 @@
 #include "hos_coop_pads.h"
 #include "hos_coop_save_load.h"
 #include "hos_coop_sound.h"
+#include "hos_coop_pane_text.h"
 #include "hos_coop_host.h"
 #include "hos_coop_world.h"
 #include "hos_coop_view.h"
+#include "hos_coop_turn.h"
 #include "coop_export_guard.h"
 
 #ifdef _WIN32
@@ -1651,6 +1654,9 @@ bool Start(const HosCoopApi* api) {
                                                        : "by reading the tables (LICHII_COOP_FLAG_EVENTS=0)",
              g_flag_setters.load() ? "through the game's setters on its calc thread"
                                    : "into the game's queues (LICHII_COOP_FLAG_SETTERS=0)");
+    // Row 63: the host's Gold Skulltula choice (coop-options.ini gold_skulltulas) before co-op starts, so a Host.bat
+    // start, the first player in, puts it in force at its welcome (lane run of 2026-11-23: read later, it was lost).
+    CoopFiles::ReadOptions();
     CoopHook::Start();
     g_on = true;
     CoopModsRuntime::Start();  // the mods folder and the code mods (docs/mods.md)
@@ -1808,6 +1814,9 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
                      level.version < HOS_COOP_WORLD_VERSION ? ": an older Hookshot build, some hooks are missing" : "");
             if ((level.wraps >> HOS_COOP_WRAP_SOUND_EMIT & 1) == 0) {
                 LOG_INFO(Core, "coop: this Hookshot has no sound wrap (patch 0014): our Link's sounds are not sent");
+            }
+            if (CoopPlaytest::On() && (level.wraps >> HOS_COOP_WRAP_PANE_TEXT & 1) == 0) {
+                LOG_INFO(Core, "coop: playtest: this Hookshot has no pane text wrap (patch 0041): `text` stays empty");
             }
         }
         {
@@ -2082,6 +2091,16 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             // age is written in place now (coop_char_ages.h). Writes the pick's live value only.
             CoopHook::EmulatorMemory memory(g_system.ApplicationMemory(), CoopRuntime::MainBase());
             CoopCharAges::AtSaveLoaded(memory);
+        }
+        return 0;
+    }
+    if (id == HOS_COOP_WRAP_PANE_TEXT) {
+        // A text the game sets in a text pane (patch 0041): copied for the play-test bridge's `text` only
+        // (coop_talk_text.h). Nothing when the bridge is off. Reads only.
+        if (phase == 0 && CoopPlaytest::On()) {
+            CoopTalkText::TheLog().Note(x[0], x[1], CoopPlaytest::Frame(), [](std::uint64_t a, void* out, std::size_t n) {
+                return CoopRuntime::Read(a, out, n);
+            });
         }
         return 0;
     }
@@ -2799,6 +2818,15 @@ COOP_HOOKSHOT_EXPORT int hos_coop_menu_picture(int tab, HosCoopMenuPicture* out)
         return g_on && CoopPause::Picture(tab, out) ? 1 : 0;
     });
 }
+// The player camera's angles (hos_coop_turn.h, patch 0040): turned with the Customize page's orbit, so the game's
+// own collision places the eye.
+COOP_HOOKSHOT_EXPORT int hos_coop_turn(float* yaw, float* pitch, int state) {
+    static CoopBoundary::Site site{"hos_coop_turn"};
+    return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
+        // (also with co-op off: a camera still turned is put back once)
+        return CoopLookView::Turn(yaw, pitch, state, g_on) ? 1 : 0;
+    });
+}
 // The gameplay camera (hos_coop_view.h, patch 0019): around your own Link while the Customize page shows him.
 COOP_HOOKSHOT_EXPORT int hos_coop_view(double eye[3], double target[3]) {
     static CoopBoundary::Site site{"hos_coop_view"};
@@ -2832,6 +2860,8 @@ COOP_HOOKSHOT_EXPORT uint64_t hos_coop_pad(uint64_t buttons, int32_t stick[4]) n
     const uint64_t came = buttons;
     int32_t was[4] = {stick[0], stick[1], stick[2], stick[3]};
     try {
+        // A play-test `move` (coop_playtest.h): its stick, from the world yaw and this frame's camera, is the pad's.
+        CoopPlaytest::PadMove(stick);
         const uint64_t got = CoopPadOrder::Run(
             buttons, stick,
             [](uint64_t b, int32_t* s) {

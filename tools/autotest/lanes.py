@@ -150,10 +150,9 @@ def running_in(folder):
     """Game processes started from inside folder (Windows only; elsewhere none known)."""
     if not hs.WINDOWS:
         return []
-    import subprocess
-    r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                        "Get-Process %s -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }" % ",".join(GAME_EXES)],
-                       capture_output=True, text=True)
+    r = hs.run_quiet(["powershell", "-NoProfile", "-Command",
+                      "Get-Process %s -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }" % ",".join(GAME_EXES)],
+                     capture_output=True, text=True)
     want = os.path.normcase(os.path.abspath(folder)) + os.sep
     return [p for p in r.stdout.splitlines() if os.path.normcase(p.strip()).startswith(want)]
 
