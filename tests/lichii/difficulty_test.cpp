@@ -343,10 +343,121 @@ TEST_CASE("difficulty: a full kinds table marks nothing more and scales nothing 
   }
   CHECK(found == marked);
   CHECK(kinds->Of(0x7777'0000'0000) == Kind::none);
-  // The refused ones are counted (for the log), until a new scene.
+  // The refused ones of a walk are counted when it ends (for the log), with what the table holds.
+  CHECK(kinds->Unmarked() == 0);
+  kinds->Sweep();
   CHECK(kinds->Unmarked() == 4 * CoopDifficulty::Kinds::kSlots - marked);
+  CHECK(kinds->Held() == marked);
+  kinds->Sweep();  // (a walk that refused nothing)
+  CHECK(kinds->Unmarked() == 0);
   kinds->Clear();
   CHECK(kinds->Unmarked() == 0);
+  CHECK(kinds->Held() == 0);
+}
+
+TEST_CASE("difficulty: an address the walk no longer marks gives its slot back (row 270)") {
+  using CoopDifficulty::Kind;
+  using CoopDifficulty::Kinds;
+  auto kinds = std::make_unique<Kinds>();
+  const std::uint64_t kLink = 0x5000'0010;
+  // One scene, never left: 40 enemies alive at a time (an actor and a Life component each), and every few
+  // seconds they are other ones at other addresses (a night's Stalchildren, a boss's shots). Far more
+  // addresses than slots pass through; none is ever refused, and each one alive is scaled.
+  const std::uint64_t kAlive = 40;
+  const std::uint64_t kWaves = 200;  // 200 * 80 = 16000 addresses through 1024 slots
+  for (std::uint64_t wave = 0; wave < kWaves; ++wave) {
+    const std::uint64_t base = 0x6000'0000 + wave * 0x10000;
+    for (std::uint64_t walk = 0; walk < Kinds::kKeepWalks + 10; ++walk) {
+      CHECK(kinds->Mark(kLink, Kind::our_link_life));
+      for (std::uint64_t i = 0; i < kAlive; ++i) {
+        CHECK(kinds->Mark(base + i * 0x200, Kind::enemy));
+        CHECK(kinds->Mark(base + i * 0x200 + 0x100, Kind::enemy_life));
+      }
+      kinds->Sweep();
+      CHECK(kinds->Unmarked() == 0);
+    }
+    CHECK(kinds->Of(base) == Kind::enemy);
+    CHECK(kinds->Of(base + 0x100) == Kind::enemy_life);
+    CHECK(kinds->Of(kLink) == Kind::our_link_life);
+    CHECK(kinds->Held() <= 1 + 4 * kAlive);  // this wave's and at most the one before's
+    if (wave > 0) {
+      CHECK(kinds->Of(base - 0x10000) == Kind::none);  // the wave before: gone, its slots free
+    }
+  }
+}
+
+TEST_CASE("difficulty: a slot is kept while its address is marked, and through a few walks that miss it") {
+  using CoopDifficulty::Kind;
+  using CoopDifficulty::Kinds;
+  auto kinds = std::make_unique<Kinds>();
+  const CoopDifficulty::Values hard{150, 150, 100};
+  const auto none = [] { return std::uint64_t{0}; };
+  const std::uint64_t kLife = 0x7000'0100;
+  CHECK(kinds->Mark(kLife, Kind::enemy_life));
+  CHECK(kinds->Step(kLife, 1, hard, 0, none) == 0);  // 1 at 150% life: 0 now, 2/3 carried
+  for (std::uint64_t walk = 0; walk + 1 < Kinds::kKeepWalks; ++walk) {
+    kinds->Sweep();  // (walks that do not read it: a load, a missed read)
+  }
+  CHECK(kinds->Of(kLife) == Kind::enemy_life);
+  CHECK(kinds->Mark(kLife, Kind::enemy_life));  // read again: the same slot, its carry kept
+  CHECK(kinds->Step(kLife, 1, hard, 0, none) == 1);
+  for (std::uint64_t walk = 0; walk < Kinds::kKeepWalks; ++walk) {
+    kinds->Sweep();
+  }
+  CHECK(kinds->Of(kLife) == Kind::enemy_life);  // (its own walk and kKeepWalks - 1 more: still held)
+  kinds->Sweep();
+  CHECK(kinds->Of(kLife) == Kind::none);  // gone for good: freed
+  CHECK(kinds->Step(kLife, 3, hard, 0, none) == 3);
+  CHECK(kinds->Held() == 0);
+}
+
+TEST_CASE("difficulty: an address past a freed slot is still found, and marked again in its own slot") {
+  using CoopDifficulty::Kind;
+  using CoopDifficulty::Kinds;
+  auto kinds = std::make_unique<Kinds>();
+  // Enough addresses that many share a probe run; the even ones are then left to go.
+  const std::uint64_t kCount = 600;
+  const auto address = [](std::uint64_t i) { return 0x8000'0000 + i * 0x130; };
+  std::vector<bool> in(kCount, false);
+  for (std::uint64_t i = 0; i < kCount; ++i) {
+    in[i] = kinds->Mark(address(i), Kind::enemy);
+  }
+  kinds->Sweep();
+  for (std::uint64_t walk = 0; walk < Kinds::kKeepWalks; ++walk) {
+    for (std::uint64_t i = 1; i < kCount; i += 2) {
+      if (in[i]) {
+        CHECK(kinds->Mark(address(i), Kind::enemy));
+      }
+    }
+    kinds->Sweep();
+  }
+  std::uint64_t odd = 0;
+  for (std::uint64_t i = 0; i < kCount; ++i) {
+    if (i % 2 == 0) {
+      CHECK(kinds->Of(address(i)) == Kind::none);
+    } else if (in[i]) {
+      ++odd;
+      CHECK(kinds->Of(address(i)) == Kind::enemy);
+    }
+  }
+  CHECK(kinds->Held() == odd);
+  // A kept address marked again takes no second slot; new addresses take the freed ones.
+  for (std::uint64_t i = 1; i < kCount; i += 2) {
+    if (in[i]) {
+      CHECK(kinds->Mark(address(i), Kind::folded_enemy));
+    }
+  }
+  for (std::uint64_t i = 0; i < kCount; i += 2) {
+    CHECK(kinds->Mark(0x9000'0000 + i * 0x130, Kind::boss));
+  }
+  kinds->Sweep();
+  CHECK(kinds->Unmarked() == 0);
+  CHECK(kinds->Held() == odd + kCount / 2);
+  for (std::uint64_t i = 1; i < kCount; i += 2) {
+    if (in[i]) {
+      CHECK(kinds->Of(address(i)) == Kind::folded_enemy);
+    }
+  }
 }
 
 TEST_CASE("difficulty: a reused address is no enemy any more once the walk sees another actor there") {

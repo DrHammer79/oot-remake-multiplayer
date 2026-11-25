@@ -164,10 +164,17 @@ inline constexpr std::uint64_t kHitAttacker = 0x240;
 
 // Addresses and their Kind, with each Life component's carry. One writer
 // (the object walk, present thread: Mark and Clear), any number of readers
-// (the game's threads: Step and Pass); no lock. A full table marks nothing
-// more (its hits then go through unscaled, counted in Unmarked) until Clear
-// (a new scene). An address that holds another actor now is marked again
-// (Kind::none when it is no enemy).
+// (the game's threads: Step and Pass); no lock. An address that holds another
+// actor now is marked again (Kind::none when it is no enemy).
+//
+// Row 270: a slot is its address's only while the walk keeps marking it. The
+// walk ends with Sweep, and an address no walk marked for kKeepWalks walks
+// (its actor deleted: a night's Stalchildren, a boss's shots) gives its slot
+// back for the next new address. Before, a slot was an address's until Clear
+// (a new scene), so a long stay in one scene with enemies coming and going
+// filled the table and every later enemy went unscaled. A table full of live
+// addresses still marks nothing more (those hits go through unscaled,
+// counted in Unmarked).
 class Kinds {
 public:
     static constexpr std::size_t kSlots = 1024;
@@ -188,6 +195,13 @@ public:
     void Pass(std::uint64_t component, std::int32_t amount, std::uint64_t now_ms) noexcept;
     Kind Of(std::uint64_t address) const noexcept;
     void Clear() noexcept;
+    // The end of one whole walk (the writer's thread): frees the slots of the
+    // addresses no walk marked for kKeepWalks walks, and closes the walk's
+    // count of refused marks (Unmarked).
+    void Sweep() noexcept;
+    // An address no walk marked for this many walks is gone: a few seconds
+    // of walks, so a walk that misses one read frees nothing.
+    static constexpr std::uint64_t kKeepWalks = 120;
 
     // One Life step of `component` with `sum` (the frame's damage): what the
     // game takes at `values`. `attacker()` reads the hit's attacker actor;
@@ -241,8 +255,11 @@ public:
     std::uint64_t BossSteps() const noexcept { return boss_steps_.load(std::memory_order_relaxed); }
     std::uint64_t BossDamageIn() const noexcept { return boss_in_.load(std::memory_order_relaxed); }
     std::uint64_t BossDamageTaken() const noexcept { return boss_took_.load(std::memory_order_relaxed); }
-    // Marks the full table refused since the last Clear.
-    std::uint64_t Unmarked() const noexcept { return unmarked_.load(std::memory_order_relaxed); }
+    // Marks the full table refused in the last whole walk (Sweep): that many
+    // actors or Life components are unscaled now.
+    std::uint64_t Unmarked() const noexcept { return unmarked_last_.load(std::memory_order_relaxed); }
+    // Slots that hold an address now, as of the last Sweep.
+    std::uint64_t Held() const noexcept { return held_.load(std::memory_order_relaxed); }
 
 private:
     struct Slot {
@@ -264,7 +281,16 @@ private:
     Slot* Find(std::uint64_t address) noexcept;
     const Slot* Find(std::uint64_t address) const noexcept;
 
+    // A freed slot's key: no address, and not the end of a probe run (a
+    // reader goes on past it; the writer puts the next new address there).
+    static constexpr std::uint64_t kFreed = 1;
+
     std::array<Slot, kSlots> slots_{};
+    // The writer's own: the walk that last marked each slot, and the walk now.
+    std::array<std::uint64_t, kSlots> marked_{};
+    std::uint64_t walk_ = 1;
+    std::atomic<std::uint64_t> unmarked_last_{0};
+    std::atomic<std::uint64_t> held_{0};
     std::atomic<std::uint64_t> enemy_hits_{0};
     std::atomic<std::uint64_t> link_hits_{0};
     std::atomic<std::uint64_t> boss_steps_{0};
