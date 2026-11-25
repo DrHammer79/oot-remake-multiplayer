@@ -3591,3 +3591,182 @@ TEST_CASE("native boss: Twinrova hand-over, a copy's own start of another move t
     CHECK(other.OnActionVerb(kBsa, GameRequest(5, kNode), true, false, std::nullopt, nullptr, &answer));
     CHECK(answer == addr::kActionTaken);
 }
+
+// Twinrova hand-over (coop_boss_shots.h): a copy fires the owner's shots, once each, and makes none of its own.
+#include "coop_boss_shots.h"
+
+namespace {
+
+namespace bs = CoopBossShots;
+
+constexpr std::uint64_t kShotMain = 0x80020000;
+constexpr std::uint64_t kTwinrova = 0x1000000;
+constexpr std::uint64_t kShotBlock = 0x3000000;
+constexpr std::uint64_t kShooter = 0x5000000;
+constexpr std::uint64_t kMap = 0x5100000;
+constexpr std::uint64_t kRecords = 0x5200000;
+constexpr std::uint32_t kSlotKey = 0x1234;
+constexpr std::uint32_t kKeyHash = 0xabcdef01;
+
+template <typename T>
+void PutAt(FakeGuest& g, std::uint64_t at, T v) {
+    g.Write(at, &v, sizeof v);
+}
+
+// Twinrova's Shooter: two map slots, the second keyed kSlotKey with three records.
+void PutShooter(FakeGuest& g, std::uint64_t actor) {
+    PutAt(g, actor + bs::addr::kActorComponents, std::uint64_t{actor + 0x8000});
+    PutAt(g, actor + 0x8000 + bs::addr::kComponentShooter, kShooter);
+    PutAt(g, kShooter + bs::addr::kShooterMap, kMap);
+    PutAt(g, kShooter + bs::addr::kShooterSlots, std::uint32_t{2});
+    const std::uint64_t slot = kMap + bs::addr::kSlotSize;
+    PutAt(g, slot, kSlotKey);
+    PutAt(g, slot + bs::addr::kSlotCount, std::uint32_t{3});
+    PutAt(g, slot + bs::addr::kSlotRecords, kRecords);
+    PutAt(g, slot + bs::addr::kSlotKeyHash, kKeyHash);
+}
+
+// The AI step's call as SHOOT_FROM sees it: x1 on its stack, its return address below, x2 at x1 + 0x68.
+std::uint64_t PutShootArgs(FakeGuest& g, std::uint64_t actor, const char* name) {
+    const std::uint64_t args = 0x6000100;
+    PutAt(g, args, actor);
+    PutAt(g, args + bs::addr::kArgFlag, std::uint8_t{1});
+    PutAt(g, args - bs::addr::kCallerMark, std::uint64_t{kShotMain + bs::addr::kShootCaller});
+    const std::uint64_t values = args + bs::addr::kArgValues;
+    PutAt(g, values + bs::addr::kValueName, std::uint64_t{0x6100000});
+    PutAt(g, std::uint64_t{0x6100000}, std::uint64_t{0x6100100});
+    g.Write(0x6100100, name, std::strlen(name) + 1);
+    PutAt(g, values + bs::addr::kValueKeyHash, kKeyHash);
+    PutAt(g, values + bs::addr::kValueWord, std::uint32_t{7});
+    PutAt(g, values + bs::addr::kValueParam, std::uint8_t{2});
+    return args;
+}
+
+std::vector<CoopPuppet::Call> ShotFrame(bs::Table& t, FakeGuest& g) {
+    std::vector<CoopPuppet::Call> calls;
+    auto c = t.Step(g, false, 0, kShotMain);
+    while (c) {
+        calls.push_back(*c);
+        c = t.Step(g, true, c->function == kShotMain + bs::addr::kMalloc ? kShotBlock : 0, kShotMain);
+    }
+    return calls;
+}
+
+bs::Member TwinMember(bs::Role role, std::uint8_t owner) {
+    return {kTwinrova, role, owner, "Enemy_DungeonBoss_Twinrova"};
+}
+
+}  // namespace
+
+TEST_CASE("boss shots: the owner keeps its Twinrova's shots from the AI step, with slot key and record index") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    PutShooter(g, kTwinrova);
+    const bs::Member m = TwinMember(bs::Role::owner, 1);
+    t.Publish({&m, 1});
+    const std::uint64_t args = PutShootArgs(g, kTwinrova, "Twinrova_Bullet_Fire");
+    t.OnShoot(g, args, kRecords + 2 * bs::addr::kRecordSize, kShotMain, 1000);
+    t.OnShoot(g, args, kRecords + 0 * bs::addr::kRecordSize, kShotMain, 1000);
+    const auto shots = t.OwnerShots(kTwinrova, 2000);
+    REQUIRE(shots);
+    CHECK(shots->seq == 2);
+    REQUIRE(shots->recent.size() == 2);
+    CHECK(shots->recent[0] == bs::BossShot{1, "Twinrova_Bullet_Fire", kSlotKey, 2, kKeyHash, 7, 2, 1});
+    CHECK(shots->recent[1].index == 0);
+    // Another caller (its return address is not the AI step's): not kept. Kept ones go after kKeepUs.
+    PutAt(g, args - bs::addr::kCallerMark, std::uint64_t{0});
+    t.OnShoot(g, args, kRecords, kShotMain, 3000);
+    CHECK(t.GetCounts().owner_kept == 2);
+    CHECK_FALSE(t.OwnerShots(kTwinrova, 1000 + bs::Table::kKeepUs + 1));
+}
+
+TEST_CASE("boss shots: a copy fires each owner shot once through the shoot code, and its own AI's are stopped") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    PutShooter(g, kTwinrova);
+    const bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    // Before the owner's first shot: the copy's own shots are made.
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    const bs::BossShot s1{1, "Twinrova_Bullet_Fire", kSlotKey, 1, kKeyHash, 7, 2, 1};
+    t.Receive(kTwinrova, bs::BossShots{1, {s1}});
+    CHECK(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Enemy_Other"));  // (not a split shot)
+    auto calls = ShotFrame(t, g);
+    REQUIRE(calls.size() == 2);  // the block, then the shot
+    const CoopPuppet::Call& c = calls[1];
+    CHECK(c.function == kShotMain + bs::addr::kShoot);
+    CHECK(c.x[0] == kRecords + bs::addr::kRecordSize);
+    CHECK(c.x[1] == kShotBlock);
+    CHECK(c.x[2] == kShotBlock + bs::addr::kBlockValues);
+    CHECK_FALSE(c.copy_game);
+    CHECK(g.Get<std::uint64_t>(kShotBlock) == kTwinrova);
+    CHECK(g.Get<std::uint8_t>(kShotBlock + bs::addr::kArgFlag) == 1);
+    const std::uint64_t string = g.Get<std::uint64_t>(c.x[2] + bs::addr::kValueName);
+    const std::uint64_t text = g.Get<std::uint64_t>(string);
+    char name[32] = {};
+    g.Read(text, name, sizeof name - 1);
+    CHECK(std::string(name) == "Twinrova_Bullet_Fire");
+    CHECK(g.Get<std::uint32_t>(c.x[2] + bs::addr::kValueKeyHash) == kKeyHash);
+    CHECK(g.Get<std::uint32_t>(c.x[2] + bs::addr::kValueWord) == 7);
+    CHECK(g.Get<std::uint8_t>(c.x[2] + bs::addr::kValueParam) == 2);
+    // The same samples again: nothing fires twice. A new shot (with the old one still listed) fires once.
+    t.Receive(kTwinrova, bs::BossShots{1, {s1}});
+    CHECK(ShotFrame(t, g).empty());
+    bs::BossShot s2 = s1;
+    s2.seq = 2;
+    s2.index = 0;
+    t.Receive(kTwinrova, bs::BossShots{2, {s1, s2}});
+    t.Receive(kTwinrova, bs::BossShots{2, {s1, s2}});
+    calls = ShotFrame(t, g);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0].x[0] == kRecords);
+    CHECK(t.GetCounts().fired == 2);
+}
+
+TEST_CASE("boss shots: a key from another game finds the slot by its key hash, and no record drops the shot") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    PutShooter(g, kTwinrova);
+    const bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    t.Receive(kTwinrova, bs::BossShots{2, {{1, "Twinrova_Bullet_Ice", 0x999, 2, kKeyHash, 0, 0, 0},
+                                           {2, "Twinrova_Bullet_Ice", kSlotKey, 5, kKeyHash, 0, 0, 0}}});
+    const auto calls = ShotFrame(t, g);
+    REQUIRE(calls.size() == 2);
+    CHECK(calls[1].x[0] == kRecords + 2 * bs::addr::kRecordSize);
+    CHECK(t.GetCounts().dropped == 1);  // (index 5 of 3 records)
+}
+
+TEST_CASE("boss shots: a hand-over starts again (ours fires on its own, a new owner's shots fire from its count)") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    PutShooter(g, kTwinrova);
+    bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    const bs::BossShot s{9, "Twinrova_Bullet_Fire", kSlotKey, 0, kKeyHash, 0, 0, 0};
+    t.Receive(kTwinrova, bs::BossShots{9, {s}});
+    CHECK(ShotFrame(t, g).size() == 2);
+    // Made ours: our own AI's shots are made.
+    m = TwinMember(bs::Role::owner, 0);
+    t.Publish({&m, 1});
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    // Then player 3's, whose count starts at 1: its first shot fires.
+    m = TwinMember(bs::Role::copy, 3);
+    t.Publish({&m, 1});
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    bs::BossShot n = s;
+    n.seq = 1;
+    t.Receive(kTwinrova, bs::BossShots{1, {n}});
+    CHECK(ShotFrame(t, g).size() == 1);
+    CHECK(t.GetCounts().fired == 2);
+    // Other bosses are not covered.
+    const bs::Member other{0x2000000, bs::Role::copy, 2, "Enemy_DungeonBoss_Goma"};
+    t.Publish({&other, 1});
+    t.Receive(0x2000000, bs::BossShots{1, {n}});
+    CHECK_FALSE(t.StopsOwn(0x2000000, "Twinrova_Bullet_Fire"));
+}

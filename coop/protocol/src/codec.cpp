@@ -689,6 +689,14 @@ Error check_object_state(const ObjectState& s) {
       before = v.seq;
     }
   }
+  if (s.shots) {
+    if (s.shots->recent.size() > kMaxBossShots) return Error::bad_value;
+    std::uint32_t before = 0;
+    for (const BossShot& o : s.shots->recent) {
+      if (o.seq == 0 || o.seq <= before || o.seq > s.shots->seq || !ValidShotName(o.name)) return Error::bad_value;
+      before = o.seq;
+    }
+  }
   if (s.orders) {
     if (s.orders->recent.size() > kMaxBossOrders) return Error::bad_value;
     std::uint32_t before = 0;
@@ -825,6 +833,22 @@ void write_object_state(const ObjectState& s, Writer& w) {
       }
     });
   }
+  if (s.shots) {
+    component(ObjectComponent::shots, [&] {
+      w.u32(s.shots->seq);
+      w.u8(static_cast<std::uint8_t>(s.shots->recent.size()));
+      for (const BossShot& o : s.shots->recent) {
+        w.u32(o.seq);
+        w.str(o.name);
+        w.u32(o.key);
+        w.u16(o.index);
+        w.u32(o.key_hash);
+        w.u32(o.w4);
+        w.u8(o.param);
+        w.u8(o.flag);
+      }
+    });
+  }
   if (s.variants) {
     component(ObjectComponent::variants, [&] {
       w.u8(static_cast<std::uint8_t>(s.variants->recent.size()));
@@ -848,6 +872,11 @@ void write_object_state(const ObjectState& s, Writer& w) {
 }
 
 }  // namespace
+
+bool ValidShotName(std::string_view name) {
+  return !name.empty() && name.size() <= kMaxBossShotChars &&
+         std::all_of(name.begin(), name.end(), [](char ch) { return ch >= 0x21 && ch <= 0x7e; });
+}
 
 bool ValidVariantName(std::string_view name) {
   if (name.size() > kMaxBossVariantChars) return false;
@@ -1586,6 +1615,28 @@ Error decode_component(ObjectComponent id, Reader& c, ObjectState& s, bool& know
         if (o.seq == 0 || o.seq <= before || o.seq > b.seq) return Error::bad_value;
         before = o.seq;
         for (std::uint8_t& byte : o.payload) COOP_READ(c.u8(byte));
+      }
+      return Error::none;
+    }
+    case ObjectComponent::shots: {
+      BossShots& b = s.shots.emplace();
+      std::uint8_t count = 0;
+      COOP_READ(c.u32(b.seq));
+      COOP_READ(c.u8(count));
+      if (count > kMaxBossShots) return Error::bad_value;
+      std::uint32_t before = 0;
+      for (std::uint8_t i = 0; i < count; ++i) {
+        BossShot& o = b.recent.emplace_back();
+        COOP_READ(c.u32(o.seq));
+        COOP_TRY(c.str(o.name, kMaxBossShotChars));
+        COOP_READ(c.u32(o.key));
+        COOP_READ(c.u16(o.index));
+        COOP_READ(c.u32(o.key_hash));
+        COOP_READ(c.u32(o.w4));
+        COOP_READ(c.u8(o.param));
+        COOP_READ(c.u8(o.flag));
+        if (o.seq == 0 || o.seq <= before || o.seq > b.seq || !ValidShotName(o.name)) return Error::bad_value;
+        before = o.seq;
       }
       return Error::none;
     }

@@ -885,6 +885,31 @@ the owner drops the old owner's moves still queued (its own AI runs the boss fro
 in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change; NEXT49: made ours with its
 own AI in another move goes on, and a copy's own start of another move than the owner's waits).
 
+### Shots on the owner's word (0.11.13)
+
+Item 3's hold did not bring the copy's bullets back in step: the copy's AI still fires on its own time. Twinrova's
+bullets are split shots (each game keeps its own copy boss's bullet), so a copy whose AI missed the window showed the
+attack with no bullet. Now the bullet follows the owner's shot, not the copy's AI (`coop_boss_shots.h`):
+
+- The owner's game sees each shot its Twinrova fires through the game's shoot code (main+0xc16cf0, called by the
+  Shooter component's AI step main+0x2eb07d0 once per record), at patch 0007's SHOOT_FROM hook. It keeps the
+  bullet's name, the shoot values (Shootable_KeyHash, the next word, OverrideParamNum), the flag byte after the
+  actor, and the record's slot key and index in its own Shooter map. They go out in the boss's samples for 500 ms
+  (OBJECT_SAMPLE component 25 `shots`, no protocol bump).
+- A copy calls the same shoot code itself for each of the owner's shots, once, on its own record of that slot (by
+  its key, else by the slot's key hash), with the same values built in a block of guest memory. The call is ours,
+  so its bullet is never stopped.
+- Once the owner's first shot has come, the copy's own AI's split shots from the shoot code are not made
+  (CREATE_REQUEST), so each owner shot is one bullet in every game. Before that (a new copy, an older owner) the
+  copy's own shots are made, as before.
+- A hand-over starts it again: the new owner's AI fires on its own, a game made a copy waits for the new owner's
+  first shot.
+
+The log says `shots: the owner's came` per copy and a summary line every 10 s (`ours sent`, `owner's fired`, `own
+stopped`, `dropped`). `LICHII_COOP_BOSS_SHOTS=0` turns it off. Not yet known: whether the copy's Shooter has the
+slot when the owner fires (a shot with no record is dropped and logged). Tests: boss_native_test ("boss shots"),
+codec_test (component 25).
+
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
 **Seen.** #258 (host log, kit 0.11.11; P2 owned Barinade): each of P2's five jellyfish kills was replayed twice on

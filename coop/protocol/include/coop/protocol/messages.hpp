@@ -860,6 +860,7 @@ enum class ObjectComponent : std::uint16_t {
   strike = 22,  // row 230: a Redead's or Gibdo's scream that froze the owner's Link (ObjectStrike below)
   orders = 23,  // protocol 16, row 222: the battle manager's orders this enemy took (BossOrders below)
   variants = 24,  // row 222 part 2: the variation (plug name) of the owner's boss actions (BossVariants below)
+  shots = 25,     // Twinrova hand-over: the shots the owner's boss fired through the game's shoot code (BossShots below)
 };
 
 struct ObjectLife {
@@ -1019,6 +1020,36 @@ struct BossVariants {
 // Whether a plug name may go on the wire (empty, or 1 to kMaxBossVariantChars printable ASCII characters).
 bool ValidVariantName(std::string_view name);
 
+// Component 25 (Twinrova hand-over, no protocol bump: older builds skip it by its length): the shots the owner's boss
+// fired through the game's shoot code (main+0xc16cf0, called once per shooter record by the Shooter component's AI
+// step main+0x2eb07d0). A copy's own AI runs its moves on its own time and after hand-overs fired in other windows
+// than the owner's (NEXT49: 4 of 11), so a copy fires each of the owner's shots itself, through the same code with
+// the same arguments, and its own AI's shots are not made (coop_boss_shots.h). Each: seq (the owner's own count for
+// this boss, from 1), the bullet's name (1 to kMaxBossShotChars printable ASCII), the shooter map key and record
+// index it was fired from (Shooter +0x20's map, coop_shot_reflect.h), the shoot argument's Shootable_KeyHash (+8),
+// its w4 (+0xc) and OverrideParamNum (+0x10), and the flag byte the caller puts after the actor. recent holds the
+// shots of the last kBossShotKeepUs at most kMaxBossShots, oldest first.
+inline constexpr std::size_t kMaxBossShots = 8;
+inline constexpr std::size_t kMaxBossShotChars = 64;
+struct BossShot {
+  std::uint32_t seq = 0;
+  std::string name;
+  std::uint32_t key = 0;     // the shooter map slot's key
+  std::uint16_t index = 0;   // the record in that slot
+  std::uint32_t key_hash = 0;
+  std::uint32_t w4 = 0;
+  std::uint8_t param = 0;
+  std::uint8_t flag = 0;
+  bool operator==(const BossShot&) const = default;
+};
+struct BossShots {
+  std::uint32_t seq = 0;  // the newest shot's seq
+  std::vector<BossShot> recent;
+  bool operator==(const BossShots&) const = default;
+};
+// Whether a bullet name may go on the wire (1 to kMaxBossShotChars printable ASCII characters).
+bool ValidShotName(std::string_view name);
+
 // The components of OBJECT_SAMPLE, OBJECT_SPAWN and HANDOVER_STATE. time is
 // always sent; the others when the sender has them. Floats must be finite.
 struct ObjectState {
@@ -1036,6 +1067,7 @@ struct ObjectState {
   std::optional<ObjectStrike> strike;               // row 230: the owner's Link frozen by its scream
   std::optional<BossOrders> orders;                 // protocol 16: its battle manager's orders (row 222)
   std::optional<BossVariants> variants;             // row 222 part 2: its owner's action variations (no bump)
+  std::optional<BossShots> shots;                   // Twinrova hand-over: its owner's shots (no bump)
   bool operator==(const ObjectState&) const = default;
 };
 

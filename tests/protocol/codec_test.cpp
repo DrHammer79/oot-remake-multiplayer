@@ -1226,6 +1226,31 @@ TEST_CASE("object samples carry a battle manager's orders, component 23 (protoco
   CHECK(decode_bytes(raw) == Error::bad_value);
 }
 
+TEST_CASE("object samples carry the owner's boss shots, component 25 (Twinrova hand-over, no bump)") {
+  CHECK(static_cast<int>(ObjectComponent::shots) == 25);
+  ObjectSample s{0, test::kPlacedId, 3, {}};
+  s.state.time = {100, 1};
+  s.state.shots = BossShots{5, {{4, "Twinrova_Bullet_Fire", 0x1234, 2, 0xabcdef01u, 7, 2, 1},
+                                {5, "Twinrova_Bullet_Ice", 0x1234, 0, 0xabcdef01u, 0, 0, 0}}};
+  const Bytes bytes = must_encode(s);
+  Message back;
+  REQUIRE(decode(bytes, back) == Error::none);
+  CHECK(std::get<ObjectSample>(back) == s);
+  // Refused: seqs from 1, rising, none above seq; a name; at most kMaxBossShots.
+  Bytes out;
+  s.state.shots->recent[0].seq = 0;
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.shots->recent[0].seq = 4;
+  s.state.shots->recent[1].name.clear();
+  CHECK(encode(s, out) == Error::bad_value);
+  s.state.shots = BossShots{20, std::vector<BossShot>(kMaxBossShots + 1)};
+  for (std::size_t i = 0; i < s.state.shots->recent.size(); ++i) {
+    s.state.shots->recent[i].seq = static_cast<std::uint32_t>(i + 1);
+    s.state.shots->recent[i].name = "Twinrova_Bullet_Fire";
+  }
+  CHECK(encode(s, out) == Error::bad_value);
+}
+
 TEST_CASE("object samples carry the owner's boss action variations, component 24 (row 222 part 2, no bump)") {
   CHECK(static_cast<int>(ObjectComponent::variants) == 24);
   ObjectSample s{0, test::kPlacedId, 3, {}};
