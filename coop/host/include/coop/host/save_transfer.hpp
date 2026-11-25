@@ -284,6 +284,10 @@ class PlayedSlot {
   }
   const std::optional<Path>& slot() const { return slot_; }
   Source source() const { return source_; }
+  // The last slot known played, kept through the title (slot() forgets it there). A host asked for its save while on
+  // the title sends this one, not the newest on disk: in a co-op save folder every slot can be as new (all written
+  // by one transfer), so the newest is any of them.
+  const std::optional<Path>& last() const { return last_; }
   // In the game with no load since the title, on a runtime that shows loads: a new game, nothing saved yet.
   bool new_game(bool in_game, bool title_seen) const {
     return windows_ && title_seen && in_game && !loaded_ && !slot_;
@@ -292,9 +296,11 @@ class PlayedSlot {
  private:
   void set(const Path& p, Source s) {
     slot_ = p;
+    last_ = p;
     source_ = s;
   }
   std::optional<Path> slot_;
+  std::optional<Path> last_;
   Source source_ = Source::none;
   std::optional<Path> last_read_;
   std::optional<Path> window_read_;
