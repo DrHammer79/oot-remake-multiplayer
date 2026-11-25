@@ -2316,9 +2316,12 @@ public:
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
         // Sync digest (coop_digest.h): what we hold of each shared object, every 2 s of server time, for
-        // tools/autotest/compare_digest.py to compare with the other games' logs.
-        for (const std::string& line : digest_.Take(server_now_us, *scene, self, sync_.DigestEntries())) {
-            LOG_INFO(Core, "{}", line);
+        // tools/autotest/compare_digest.py to compare with the other games' logs. The entries are built only
+        // when a beat is due, not every frame.
+        if (digest_.Due(server_now_us)) {
+            for (const std::string& line : digest_.Take(server_now_us, *scene, self, sync_.DigestEntries())) {
+                LOG_INFO(Core, "{}", line);
+            }
         }
         for (const CoopObjects::Sync::LinkStrike& k : sync_.TakeLinkStrikes()) {
             // Row 230: another game's Redead or Gibdo froze its owner's Link with our Link in its reach: ours takes

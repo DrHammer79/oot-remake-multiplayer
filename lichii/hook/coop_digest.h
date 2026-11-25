@@ -95,7 +95,7 @@ public:
     std::vector<std::string> Take(std::uint64_t now_us, std::string_view scene, std::uint8_t self,
                                   const std::vector<Entry>& entries) {
         std::vector<std::string> out;
-        if (now_us == 0 || (next_us_ != 0 && now_us < next_us_)) {
+        if (!Due(now_us)) {
             return out;
         }
         // On time or a little late: keep the beat; far behind (a load, a pause): start over.
@@ -140,6 +140,10 @@ public:
         last_ = std::move(now);
         return out;
     }
+
+    // Whether Take(now_us, ...) writes lines: the caller builds the entries only then (they cost a walk of
+    // every shared object, so not every frame).
+    bool Due(std::uint64_t now_us) const { return now_us != 0 && (next_us_ == 0 || now_us >= next_us_); }
 
     void Reset() {
         last_.clear();

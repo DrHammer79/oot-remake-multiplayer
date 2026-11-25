@@ -87,10 +87,17 @@ TEST_CASE("digest: the room hash is the same for the same objects in any order, 
 TEST_CASE("digest: the beat keeps its rate and starts over after a stall, Reset starts afresh") {
     CoopDigest::Log log;
     int ticks = 0;
+    int due = 0;
     for (std::uint64_t t = 1 * kS; t < 21 * kS; t += 33'333) {
-        ticks += Count(log.Take(t, "S", 1, {}), " room ") > 0 ? 1 : 0;
+        const bool d = log.Due(t);
+        const bool wrote = Count(log.Take(t, "S", 1, {}), " room ") > 0;
+        CHECK(d == wrote);  // Due says exactly when Take writes: the caller builds entries only then
+        due += d ? 1 : 0;
+        ticks += wrote ? 1 : 0;
     }
     CHECK(ticks == 10);
+    CHECK(due == 10);
+    CHECK_FALSE(log.Due(0));  // no server time yet
     CHECK(Count(log.Take(100 * kS, "S", 1, {}), " room ") == 1);  // a pause: once, then the new beat
     CHECK(log.Take(101 * kS, "S", 1, {}).empty());
     (void)log.Take(102 * kS, "S", 1, {Obj(0x11, 4)});
