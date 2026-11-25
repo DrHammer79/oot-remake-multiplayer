@@ -1,7 +1,7 @@
 name: Build
 
 # Two tiers (docs/testing.md, "CI tiers"). One full run per batch, not per branch:
-# - branch tier, on a push to any other branch: linux gcc unit tests (plus a compile of
+# - branch tier (a push to a work branch no longer starts Build: see `on: push` below; kept for a pull request from a fork, which runs it): linux gcc unit tests (plus a compile of
 #   the Hookshot module, the hook code) and python-tools on ubuntu with Python 3.12, and
 #   Content guard (its own workflow). The Fritchii emulator is retired (0.11.12): no job
 #   builds or ships it; lichii/hook stays, compiled into the Hookshot module. A
@@ -30,6 +30,14 @@ name: Build
 
 on:
   push:
+    # Only main, integrate-* and tags: a push to a work branch starts nothing (every work-branch push used to start a
+    # full Build while the worker dispatched one on the same sha: 13 duplicate runs, 2026-11-25). A work branch gets
+    # Build by workflow_dispatch (one full run on the sha logged ready); Content guard is its own workflow and still runs.
+    branches:
+      - main
+      - "integrate-*"
+    tags:
+      - "**"
     paths-ignore:
       - "docs/**"
       - "**/*.md"
