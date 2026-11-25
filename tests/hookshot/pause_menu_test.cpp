@@ -2402,6 +2402,7 @@ TEST_CASE("pause tab: Settings: Shared floor switches says race mode shares none
     SelectRow(m, "Shared floor switches");
     CHECK(m.view().help.rfind("Race mode is on, so floor switches are not shared", 0) == 0);
     CHECK(m.view().help.find("stop hosting") == std::string::npos);
+    CHECK(m.view().help.size() <= 160);   // (the caption's room: a longer help is cut)
     // A guest there reads the session's state.
     Session g = Joined();
     g.rules = true;
