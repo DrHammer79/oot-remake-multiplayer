@@ -121,7 +121,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 - **Another player's sword without its blade**: with 5 or more players, or with the Giant's Knife or the broken knife, another player's sword can still show without its blade (fixed in the code since 0.11.4 and never seen working in a game: tell us).
 - **Another player's ocarina is upside down** in their hand (fixed in the code since 0.11.4, never seen working in a game: tell us).
 - **Character #48 (the floating Hylia, Hylia_MM_003)** sits with crossed legs; its crossed feet paddle while it walks or runs. A fix for it is made but not shipped yet: it belongs in the Character Select mod, not in co-op.
-- **Shot impacts**: the shots of other players show, but the spark and bounce where they hit do not ([#166](https://github.com/daurosk/oot-remake-multiplayer/issues/166)).
+- **Shot impacts**: where another player's seed, arrow or Deku Nut lands, the game's own hit spark and landing sound are played on the shot's copy (fixed in the code, not yet seen in a game: tell us; [#166](https://github.com/daurosk/oot-remake-multiplayer/issues/166)).
 - **DLSS is opt-in**: the kit builds Longshot without NVIDIA's DLSS kit, so only FSR is in the settings. An RTX owner can build it in on purpose with `NVIDIA DLSS.bat` (Linux: `bash start-squadala.sh --dlss`; [setup.md](setup.md#nvidia-dlss), PR #235 by StarAppeal, [#234](https://github.com/daurosk/oot-remake-multiplayer/issues/234)); not checked in a game.
 - **Two to four games on one PC** (Start Squadala's **Players on this PC**, or Nucleus Co-op's split screen): each player runs a full game (about 10 GB of RAM each and a share of the graphics card; [play-lan.md](play-lan.md#two-to-four-players-on-one-pc)). Native split screen, one game for all ([local-coop.md](local-coop.md)), comes in a later release.
 - **Linux kit (experimental)**: the Linux and Steam Deck kit (`Squadala-<version>-linux.zip`, [setup-linux.md](setup-linux.md)) has the same co-op; players host and join with it. Voice chat is not on Linux yet. Linux bugs carry the [linux label](https://github.com/daurosk/oot-remake-multiplayer/issues?q=is%3Aopen+label%3Alinux).
@@ -134,7 +134,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 
 ## Not yet checked in a game, or only partly
 
-- **Split shots, Poe and Gohma**: the Poe's fireball is now made in every game at that game's own Link (not yet checked in a game). Queen Gohma's spit is not split (its actor name is not known yet), so if she spits at one player, the others may not see it. [boss-multiplayer.md](boss-multiplayer.md)
+- **Split shots, Poe**: the Poe's fireball is now made in every game at that game's own Link (not yet checked in a game). Queen Gohma has no shot to split (her game files make only her eggs). [boss-multiplayer.md](boss-multiplayer.md)
 
 - **Race mode** (branch `race-mode`): a host setting in Co-op settings (the game's page and the Hookshot overlay), used at the next Host. On, players see each other, chat and talk, and each plays the world and their own save alone. Turned Off in the session, sharing comes back only with the next session. No start or finish signal yet.
 - **Gold Skulltulas, Shared or Not shared** (branch `token-share`): a host setting in Co-op settings (the game's page and the Hookshot overlay), used at the next Host. Shared, the default, also gives the token to a player whose Skulltula went without dying on their screen. Not shared is a race: each player has their own Skulltulas, tokens and count.

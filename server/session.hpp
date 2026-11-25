@@ -208,6 +208,11 @@ struct SessionConfig {
   float handover_chase_m = 20.0f;
   std::uint64_t handover_hold_us = 3'000'000;
   std::uint64_t handover_cooldown_us = 5'000'000;
+  // ai-stuns: a stun on a copy (DAMAGE of 0 for a plain enemy) waits only this long after the last change, not
+  // handover_cooldown_us: the stun is the stunner's own act and is sent once, so one refused right after a turn or a
+  // chase change left the stunner's copy stunned while the owner's enemy kept attacking (geno-polish-ai). A stun
+  // cannot shuttle: a copy that shows its owner's stun never asks, so a new ask needs a new stun.
+  std::uint64_t stun_handover_cooldown_us = 1'000'000;
   // Issue 101: a game that is not the owner says its copy chases its own
   // Link (OBJECT_PRESENT flag targeting). Its game is the only one whose
   // enemy moves right, so out of a fight the object goes to that player once
@@ -523,6 +528,7 @@ struct Stats {
   std::uint64_t boss_to_near = 0;       // a boss asked over to the player near it (issue 150)
   std::uint64_t boss_to_grabbed = 0;    // row 232: a boss asked over to a game whose Link its summoned piece holds
   std::uint64_t boss_turns = 0;          // a boss asked over to the next player's turn (boss_turn_us)
+  std::uint64_t keyed_dropped = 0;       // protocol 18: keyed values (components 25-28) not kept, list full
   std::uint64_t enemy_turns = 0;         // a plain enemy asked over to the next player's turn (enemy_turns)
   std::uint64_t boss_from_cutscene = 0;  // a boss asked away from an owner in a cutscene of its own
   std::uint64_t boss_kept_from_unready = 0;  // row 189: ticks a ready, unfit owner's boss was not asked to an unready game

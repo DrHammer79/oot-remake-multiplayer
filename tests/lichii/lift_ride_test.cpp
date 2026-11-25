@@ -148,6 +148,15 @@ TEST_CASE("switch stand: another player on our step switch sets its contact bool
     CHECK(CoopLiftRide::IsStandSwitch("Obj_DodongoCave_StepSwitch_A_02"));
     CHECK_FALSE(CoopLiftRide::IsStandSwitch("Obj_SwitchShutter_A_06"));
     CHECK_FALSE(CoopLiftRide::IsStandSwitch("Npc_StepSwitch_A_01"));
+    // Every step switch actor of the game (romfs Pack/Actor, 2026-11-24): some are spelt "Stepswitch".
+    for (const char* name : {"Obj_StepSwitch_A_01", "Obj_StepSwitch_A_02", "Obj_StepSwitch_A_04", "Obj_StepSwitch_A_05",
+                             "Obj_Stepswitch_A_03", "Obj_Stepswitch_A_03_Amos", "Obj_WaterTemple_Stepswitch_A_03",
+                             "Obj_InsideJabu_Jabu_Stepswitch_A_02", "Obj_InsideJabu_Jabu_StepSwitch_A_03",
+                             "Obj_InsideJabu_Jabu_StepSwitch_A_04"}) {
+        CAPTURE(name);
+        CHECK(CoopLiftRide::IsStandSwitch(name));
+    }
+    CHECK_FALSE(CoopLiftRide::IsStandSwitch("SwitchStep"));  // no Obj_ prefix
     // Dodongo's held switch (coop_room_objects.cpp): a puppet on it, beside it, above it.
     const std::vector<CoopLiftRide::Lift> sw{{kLift, "Obj_StepSwitch_A_01", {-49.0f, 114.2f, -8.0f}}};
     CHECK(CoopLiftRide::Stood(sw, {{-49.3f, 114.4f, -7.6f}}) == std::vector<std::uint64_t>{kLift});

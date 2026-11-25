@@ -606,6 +606,22 @@ std::optional<bool> AttackWithRally(const Seen& s, const std::vector<std::string
     return false;
 }
 
+std::vector<std::uint64_t> RallyReturnedTo(const std::vector<Seen>& seen, const std::vector<std::string_view>& makers) {
+    std::vector<std::uint64_t> out;
+    for (const Seen& s : seen) {
+        if (s.address == 0 || std::find(out.begin(), out.end(), s.address) != out.end()) {
+            continue;
+        }
+        for (const std::string_view m : makers) {
+            if (s.name.starts_with(m)) {
+                out.push_back(s.address);
+                break;
+            }
+        }
+    }
+    return out;
+}
+
 std::string_view PackFamily(std::string_view name) {
     // Pair/pack survey (2026-11-21): these fight together by messages each one's AI writes into its ally's
     // blackboard (Lizalfos/Dinolfos: SetBattlingAllyFromReferenceLink, IsRequestingCoop, IsReceivedCoop*Message;
@@ -640,10 +656,12 @@ bool IsBossOrPart(std::string_view name) {
 }
 
 bool TurnsAsEnemy(std::string_view name) {
+    // Every variant the game has (romfs Pack/Actor, 2026-11-24; not the _Dictionary display models, the _Haribote
+    // decoys or the club's shock wave). There is no plain "Enemy_IronKnuckle": each one is Black, White or Silver.
     static constexpr std::string_view kKinds[] = {
-        "Enemy_Moblin",     "Enemy_Moblin_Club",       "Enemy_Lizalfos",         "Enemy_Dinolfos",
-        "Enemy_Stalfos",    "Enemy_Stalfos_Weak",      "Enemy_Stalfos_ForChild", "Enemy_LikeLike",
-        "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_White", "Enemy_IronKnuckle_Silver",
+        "Enemy_Moblin",          "Enemy_Moblin_Club",        "Enemy_Lizalfos",          "Enemy_Dinolfos",
+        "Enemy_Stalfos",         "Enemy_Stalfos_Weak",       "Enemy_Stalfos_ForChild",  "Enemy_Stalfos_AlwaysRespawn",
+        "Enemy_LikeLike",        "Enemy_IronKnuckle_Black",  "Enemy_IronKnuckle_White", "Enemy_IronKnuckle_Silver",
     };
     return !IsBossOrPart(name) && std::find(std::begin(kKinds), std::end(kKinds), name) != std::end(kKinds);
 }
@@ -1555,6 +1573,20 @@ std::optional<proto::BossVariants> Sync::BossVariantsIn(std::uint64_t address) c
     return it->second.variants_in;
 }
 
+std::vector<std::pair<std::uint64_t, proto::BossShots>> Sync::BossShotsIn() const {
+    std::vector<std::pair<std::uint64_t, proto::BossShots>> out;
+    for (const auto& [address, o] : objects_) {
+        if (!o.shots_in) {
+            continue;
+        }
+        const auto owner = owners_.find(o.id);
+        if (owner != owners_.end() && owner->second.player != 0 && owner->second.player != self_) {
+            out.emplace_back(address, *o.shots_in);
+        }
+    }
+    return out;
+}
+
 std::vector<std::pair<std::uint64_t, proto::BossOrders>> Sync::BossOrdersIn() const {
     std::vector<std::pair<std::uint64_t, proto::BossOrders>> out;
     for (const auto& [address, o] : objects_) {
@@ -1652,6 +1684,33 @@ std::vector<std::pair<std::uint64_t, std::string>> Sync::Owned() const {
         if (owner != owners_.end() && owner->second.player != 0 && owner->second.player == self_) {
             out.emplace_back(address, o.name);
         }
+    }
+    return out;
+}
+
+std::vector<CoopDigest::Entry> Sync::DigestEntries() const {
+    std::map<proto::ObjectId, CoopDigest::Entry> by_id;
+    for (const auto& [address, o] : objects_) {
+        const auto owner = owners_.find(o.id);
+        if (owner == owners_.end() || by_id.contains(o.id)) {
+            continue;  // not shared yet (no owner news), or a second actor of one id: the first is written
+        }
+        CoopDigest::Entry e{o.id, {}};
+        e.fields.emplace_back("name", o.name);
+        e.fields.emplace_back("owner", std::to_string(owner->second.player));
+        e.fields.emplace_back("epoch", std::to_string(owner->second.epoch));
+        e.fields.emplace_back("life", o.life ? std::to_string(*o.life) : std::string("-"));
+        e.fields.emplace_back("max", std::to_string(o.max));
+        e.fields.emplace_back("dead", o.life ? (*o.life <= 0 ? "1" : "0") : "-");
+        if (owner->second.player != self_ && o.owner_life) {
+            e.fields.emplace_back("local.owner_life", std::to_string(*o.owner_life));
+        }
+        by_id.emplace(o.id, std::move(e));
+    }
+    std::vector<CoopDigest::Entry> out;
+    out.reserve(by_id.size());
+    for (auto& [id, e] : by_id) {
+        out.push_back(std::move(e));
     }
     return out;
 }
@@ -1814,6 +1873,9 @@ proto::ObjectState Sync::StateOf(Object& o, std::uint64_t now_us) {
     }
     if (o.orders) {
         state.orders = o.orders;  // row 222: its battle manager's orders
+    }
+    if (o.shots) {
+        state.shots = o.shots;  // Twinrova hand-over: its shots (component 29; an empty list for a while after)
     }
     if (o.rotation) {
         state.rotation = QuatOf(*o.rotation);
@@ -2447,13 +2509,15 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         // ai-stuns: a plain enemy's copy the same (a nut, boomerang or hookshot stun here takes no life): the
         // server hands it to us, the stunner, whose enemy is the stunned one. Only a boss goes to the boss table.
         bool own_stun = false;
-        if (s.animation && IsStunAnimation(s.animation->name) && IsStunFor(s.name, s.animation->name)) {
+        if (s.animation && IsStunFor(s.name, s.animation->name)) {
             const auto owner = owners_.find(o.id);
             const std::string owners = !o.received.empty() && o.received.back().animation
                                            ? o.received.back().animation->name
                                            : std::string{};
             if (owner != owners_.end() && owner->second.player != 0 &&
-                owner->second.player != self && !IsStunAnimation(owners)) {
+                owner->second.player != self && !IsStunFor(s.name, owners)) {
+                // (One rule for both sides: a plain enemy's owner in its own Down or Fall is in no stun, so our
+                // copy's own stun still asks; before, the boss rule read the owner's and kept the enemy there.)
                 if (!(o.animation && IsStunFor(s.name, o.animation->name))) {
                     own_stun = true;
                     o.react_at = now_us;
@@ -2498,6 +2562,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.bsa = s.bsa;
         o.variants = s.variants;
         o.orders = s.orders;
+        o.shots = s.shots;
         o.attacking = AttackWithRally(s, rally_makers);
         const bool rally_held = o.attacking.value_or(false) && !s.attacking.value_or(true);
         if (rally_held && !o.rally_held) {
@@ -2893,6 +2958,7 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         o.bsa = s->bsa;
         o.variants = s->variants;
         o.orders = s->orders;
+        o.shots = s->shots;
         o.attacking = AttackWithRally(*s, rally_makers);
         o.seen_at = now_us;
         o.name = s->name;
@@ -3358,7 +3424,8 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                                  Turned(rotation, o.sent_rotation) ||
                                  animation != o.sent_animation || slots != o.sent_slots ||
                                  (o.bsa && o.sent_bsa_seq != o.bsa->seq) ||  // native boss sync: a new boss verb at once
-                                 (o.orders && o.sent_orders_seq != o.orders->seq);  // row 222: a new order at once
+                                 (o.orders && o.sent_orders_seq != o.orders->seq) ||  // row 222: a new order at once
+                                 (o.shots && o.sent_shots_seq != o.shots->seq);  // a new shot at once
             if (!o.sent_once || changed || now_us - o.sent_at >= kStillEveryUs) {
                 proto::ObjectSample sample;
                 sample.id = o.id;
@@ -3383,6 +3450,9 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
                 }
                 if (o.orders) {
                     o.sent_orders_seq = o.orders->seq;
+                }
+                if (o.shots) {
+                    o.sent_shots_seq = o.shots->seq;
                 }
             }
         }
@@ -4260,6 +4330,7 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             o->bsa_in.reset();
             o->variants_in.reset();
             o->orders_in.reset();
+            o->shots_in.reset();
             if (owner->owner == self) {
                 // Ours now, where it stands here: nothing pulls it. A hit of
                 // ours not yet sent is already in its life, and the others
@@ -4305,6 +4376,11 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             }
             if (sample->state.orders) {
                 o->orders_in = sample->state.orders;  // row 222: the owner's battle manager orders
+            }
+            if (sample->state.shots) {
+                o->shots_in = sample->state.shots;  // Twinrova hand-over: the owner's shots
+            } else if (o->shots_in) {
+                o->shots_in->recent.clear();  // none awake there now (its empty tail missed)
             }
             if (sample->state.position && Finite(*sample->state.position)) {
                 const std::uint64_t t = sample->state.time.server_time_us;
@@ -4871,8 +4947,10 @@ bool CoversOwnReaction(const PlayWish& wish, std::string_view slot_name) {
     if (wish.keep_own_death && IsDeathAnimation(slot_name) && !IsDeathAnimation(wish.name)) {
         return true;
     }
-    const bool stunned = wish.stun_plain ? IsPlainStunAnimation(slot_name) : IsStunAnimation(slot_name);
-    return wish.keep_own_stun && stunned && !IsStunAnimation(wish.name);
+    const auto stun = [&wish](std::string_view name) {
+        return wish.stun_plain ? IsPlainStunAnimation(name) : IsStunAnimation(name);
+    };
+    return wish.keep_own_stun && stun(slot_name) && !stun(wish.name);
 }
 
 bool DeathReadFromAnimation(std::string_view name, bool reacts, bool life_read) {

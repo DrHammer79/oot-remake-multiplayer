@@ -929,6 +929,18 @@ TEST_CASE("testinput: event hands the hook an event setting's name (boss-route-0
     CHECK(requests[0].name == "DreamBossStage_Rematch_Barinade_Start");
 }
 
+TEST_CASE("testinput: autosave asks our game for its own autosave, at once (rejoin-host-273-2)") {
+    std::string error;
+    CHECK_FALSE(Parse("autosave now\n", error));
+    CHECK(error.find("want: autosave") != std::string::npos);
+    Runner r(Must("autosave\nmark after\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::autosave);
+}
+
 TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
     std::string error;
     CHECK_FALSE(Parse("menu host now\n", error));
@@ -939,6 +951,18 @@ TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
     REQUIRE(requests.size() == 1);
     CHECK(requests[0].kind == Kind::menu);
     CHECK(requests[0].name == "host");
+}
+
+TEST_CASE("testinput: menu paste hands the hook the clipboard's join (private-lobby-fix)") {
+    std::string error;
+    CHECK_FALSE(Parse("menu paste now\n", error));
+    Runner r(Must("menu Paste\n"));
+    std::vector<std::string> log;
+    r.Advance(0.0, std::nullopt, log);
+    const auto requests = r.TakeRequests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].kind == Kind::menu);
+    CHECK(requests[0].name == "paste");
 }
 
 TEST_CASE("testinput: the bridge's act allows only the listed kinds and refuses the whole script otherwise") {

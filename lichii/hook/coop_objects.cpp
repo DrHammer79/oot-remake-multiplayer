@@ -56,6 +56,7 @@
 #include "coop_boss.h"
 #include "coop_hit_replay.h"
 #include "coop_presence_gates.h"
+#include "coop_digest.h"
 #include "coop_every.h"
 #include "coop_event_result.h"
 #include "coop_cheat_items.h"
@@ -64,8 +65,10 @@
 #include "coop_actor_events.h"
 #include "coop_boss_native.h"
 #include "coop_boss_orders.h"
+#include "coop_boss_shots.h"
 #include "coop_difficulty.h"
 #include "coop_puppet.h"
+#include "coop_shot_reflect.h"
 #include "coop_pvp.h"
 #include "coop_pvp_game.h"
 #include "coop_pvp_native.h"
@@ -584,6 +587,14 @@ public:
         return p;
     }
 
+    bool Read(u64 address, void* out, std::size_t size) {
+        if (address < 0x1000 || !memory_.IsValidVirtualAddressRange(address, size)) {
+            return false;
+        }
+        memory_.ReadBlockUnsafe(address, out, size);
+        return true;
+    }
+
     std::string Name(u64 actor) {
         const auto p = Ptr(actor + kActorName);
         if (!p) {
@@ -600,6 +611,39 @@ public:
 private:
     Core::Memory::Memory& memory_;
 };
+
+// The walk's reads as a CoopPuppet::Guest, for CoopShotReflect's hit-list reading (no writes).
+class ReaderGuest final : public CoopPuppet::Guest {
+public:
+    explicit ReaderGuest(Reader& r) : r_(r) {}
+    bool Read(std::uint64_t address, void* out, std::size_t size) override { return r_.Read(address, out, size); }
+    bool Write(std::uint64_t, const void*, std::size_t) override { return false; }
+
+private:
+    Reader& r_;
+};
+
+// Rows 177/211 (row-177-ball): our own Link sent this rally ball back in our game: the game's own hit list of the
+// ball holds his sword's reflect-kind hit (CoopShotReflect::OurHit, the hit the maker's sensor query reads), or the
+// ball's Shootable state is Reflected (it flies back to its maker). The hit list holds a hit only for a moment and
+// the walk runs every two frames, so the state is read too.
+bool RallyBallSentBackByUs(Reader& r, u64 ball, u64 link) {
+    if (link == 0) {
+        return false;
+    }
+    namespace sr = CoopShotReflect::addr;
+    if (const auto table = r.Ptr(ball + kActorComponents)) {
+        if (const auto shootable = r.Ptr(*table + sr::kComponentShootable)) {
+            const auto valid = r.Get<std::uint8_t>(*shootable + sr::kShootableValid);
+            const auto state = r.Get<std::int32_t>(*shootable + sr::kShootableState);
+            if (valid && (*valid & 1) != 0 && state && *state == sr::kStateReflected) {
+                return true;
+            }
+        }
+    }
+    ReaderGuest guest(r);
+    return CoopShotReflect::OurHit(guest, ball, link, CoopShotReflect::Way::melee);
+}
 
 // Native boss sync: main's base for the boss caller (set by the walk).
 std::atomic<std::uint64_t>& TheBossMain() {
@@ -2080,6 +2124,7 @@ public:
                     }
                 }
                 sync_.Reset();
+                digest_.Reset();
                 world_.Reset();
                 ForgetGold();  // issue 89: the next save's keys are read afresh
                 block_retry_.clear();
@@ -2090,6 +2135,7 @@ public:
                     bosses.Publish({});
                 }
                 CoopBossOrders::TheTable().Publish({});  // row 222: no owner or copy: our managers decide again
+                CoopBossShots::TheTable().Publish({});   // our bosses fire on their own again
                 sharing_ = false;
             }
             if (CoopWorldSnapshot::TheStore().Enabled() && scene && !scene->empty() && Ready(system)) {
@@ -2184,6 +2230,14 @@ public:
                                        return CoopBossOrders::TheTable().Step(guest, after_call, result,
                                                                               TheBossMain().load());
                                    });
+                // Twinrova hand-over: our bullets' wakes, and the owner's shown by our copies (coop_boss_shots.h).
+                CoopSvc::AddCaller(CoopBossShots::Table::kCallerOrder,
+                                   [](CoopPuppet::Guest& guest, bool after_call,
+                                      std::uint64_t result, std::uint64_t) {
+                                       return CoopBossShots::TheTable().Step(guest, after_call, result,
+                                                                             TheBossMain().load(),
+                                                                             CoopEvery::NowUs());
+                                   });
                 CoopSvc::AddCaller(kGrassCallerOrder,
                                    [](CoopPuppet::Guest& guest, bool after_call,
                                       std::uint64_t result, std::uint64_t now_ms) {
@@ -2265,6 +2319,14 @@ public:
             sync_.SetDying(g_dying);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
+        // Sync digest (coop_digest.h): what we hold of each shared object, every 2 s of server time, for
+        // tools/autotest/compare_digest.py to compare with the other games' logs. The entries are built only
+        // when a beat is due, not every frame.
+        if (digest_.Due(server_now_us)) {
+            for (const std::string& line : digest_.Take(server_now_us, *scene, self, sync_.DigestEntries())) {
+                LOG_INFO(Core, "{}", line);
+            }
+        }
         for (const CoopObjects::Sync::LinkStrike& k : sync_.TakeLinkStrikes()) {
             // Row 230: another game's Redead or Gibdo froze its owner's Link with our Link in its reach: ours takes
             // that scream's hit, no life (its game's SleepParalysis reaction).
@@ -2467,6 +2529,25 @@ public:
                     orders.Receive(address, state);
                 }
                 for (const std::string& note : orders.TakeNotes()) {
+                    LOG_INFO(Core, "coop: bosses: {}", note);
+                }
+            }
+            // Twinrova hand-over (coop_boss_shots.h): the same bosses for their shots, then the owner's.
+            CoopBossShots::Table& shots = CoopBossShots::TheTable();
+            if (shots.On()) {
+                std::vector<CoopBossShots::Member> members;
+                members.reserve(list.size());
+                for (const CoopBossNative::Boss& b : list) {
+                    members.push_back({b.actor,
+                                       b.role == CoopBossNative::Role::owner ? CoopBossShots::Role::owner
+                                                                             : CoopBossShots::Role::copy,
+                                       b.owner, b.name});
+                }
+                shots.Publish(members);
+                for (const auto& [address, state] : sync_.BossShotsIn()) {
+                    shots.Receive(address, state);
+                }
+                for (const std::string& note : shots.TakeNotes()) {
                     LOG_INFO(Core, "coop: bosses: {}", note);
                 }
             }
@@ -2766,7 +2847,10 @@ public:
             }
         }
         // jabu-lifts (#65): our lifts another player stands on get RideOnPlayer, as our Link's contact gives it.
-        if (lift_ride_on_) {
+        // Never in race mode: each player's world is their own there, and a puppet on our lift moved it (the same
+        // rule as the switch stander below; the puppets' places are public, so no message gate stops this path).
+        const bool world_answers_puppets = !CoopRaceMode::InForce();
+        if (lift_ride_on_ && world_answers_puppets) {
             auto& rider = CoopLiftRide::TheRider();
             rider.Want(CoopLiftRide::Ridden(ride_lifts_, sync_.OthersHere(server_now_us)), main_, SteadyNowMs());
             for (const auto& line : rider.TakeNotes()) {
@@ -2775,13 +2859,17 @@ public:
         }
         // ai-switches: held step switches, anyone stands on it; the host's setting, and never in race mode (nothing
         // of the world is shared there; this path sends no message for race_private to stop).
-        if (switch_stand_on_ && CoopSwitchStandMode::InForce() && !CoopRaceMode::InForce()) {
+        if (switch_stand_on_ && CoopSwitchStandMode::InForce() && world_answers_puppets) {
             auto& stander = CoopLiftRide::TheStander();
             const auto others = sync_.OthersHere(server_now_us);
             const auto stood = CoopLiftRide::Stood(stand_switches_, others);
-            // (NEXT40 found nothing pressed: every 5 s with switches here, what the footprint sees)
-            if (!stand_switches_.empty() && SteadyNowMs() >= stand_note_ms_) {
-                stand_note_ms_ = SteadyNowMs() + 5000;
+            // (NEXT40 found nothing pressed: what the footprint sees, said when the count of switches here, of
+            // other players here or of switches stood on changes, never solo and never as a steady 5 s line)
+            const std::array<std::size_t, 3> footprint{stand_switches_.size(), others.size(), stood.size()};
+            if (stand_switches_.empty() || others.empty()) {
+                stand_note_ = {};  // said again when another player comes back here
+            } else if (footprint != stand_note_) {
+                stand_note_ = footprint;
                 float best = 1e9f, dx = 0, dy = 0, dz = 0;
                 for (const auto& s : stand_switches_) {
                     for (const auto& o : others) {
@@ -3139,7 +3227,7 @@ public:
     std::vector<CoopLiftRide::Lift> ride_lifts_;  // jabu-lifts (#65): this walk's lifts
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     std::vector<CoopLiftRide::Lift> stand_switches_;  // ai-switches: this walk's step switches
-    std::uint64_t stand_note_ms_ = 0;                 // ai-switches: the next footprint note
+    std::array<std::size_t, 3> stand_note_{};         // ai-switches: the footprint last said (switches, others, stood)
     bool switch_stand_on_ = true;                     // LICHII_COOP_SWITCH_STAND=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
     std::vector<CoopScrubs::Seen> scrubs_seen_;
@@ -3549,6 +3637,7 @@ private:
             CoopActorEvents::TheKeptDeaths().Clear();
 #endif
             sync_.Reset();
+            digest_.Reset();
             world_.Reset();
             ForgetGold();  // issue 89: a new game process, its own keys
             block_retry_.clear();
@@ -3559,6 +3648,7 @@ private:
             pvp_watch_.Reset();
             CoopProjectiles::TheOwnShots().Reset();
             CoopBossOrders::TheTable().Reset();  // row 222: its block and nodes were the old game's
+            CoopBossShots::TheTable().Reset();   // its block and bosses were the old game's
             extras_.Reset();  // difficulty: that run's extra enemies are gone with it
             horde_.Reset();
             {
@@ -4445,6 +4535,8 @@ private:
         }
         const u64 now_ms = SteadyNowMs();
         std::vector<std::string> rally_balls;  // row 211: the boss balls a sword sends back, alive in this walk
+        std::vector<std::string> rally_returned;  // rows 177/211: those our own Link sent back (RallyBallSentBackByUs)
+        std::vector<u64> rally_returned_at;       // (their actors, for the log)
         const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
@@ -4488,6 +4580,10 @@ private:
             member_log(a, known.first);  // G1: the game's own event member test, for the log
             if (CoopEnemyShots::IsRallyBall(known.first)) {
                 rally_balls.push_back(known.first);  // (no shared object: never in Seen)
+                if (RallyBallSentBackByUs(r, a, TheLinkActor().load())) {
+                    rally_returned.push_back(known.first);
+                    rally_returned_at.push_back(a);
+                }
             }
             // Difficulty: a made actor that may be an extra the director has not bound yet waits for it.
             const bool extra_unbound = (known.second == 0 || known.second == ~u64{0}) &&
@@ -4825,6 +4921,7 @@ private:
                     }
                     s.bsa = CoopBossNative::TheTable().OwnerState(a, &s.variants);
                     s.orders = CoopBossOrders::TheTable().OwnerOrders(a);  // row 222: its manager's orders, ours
+                    s.shots = CoopBossShots::TheTable().OwnerShots(a, CoopEvery::NowUs());  // its shots, ours
                     if (own_hit_life) {
                         s.hit_at = NewOwnHitAt(r, a, *own_hit_life, s.position, own_hit_took_life);
                     } else if (CoopBossNative::TheTable().OwnShotNear(s.position)) {
@@ -4885,6 +4982,16 @@ private:
         }
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
+        // Row 270: the walk is whole: the addresses it no longer marks, and the Life components it no longer sees
+        // (but for one a kept give still waits on: StaleGiven), free their slots.
+        CoopDifficulty::TheKinds().Sweep();
+#ifdef COOP_HOOKSHOT
+        CoopActorEvents::TheLifeTable().Sweep([this](u64 component) {
+            return life_components_.contains(component) ||
+                   std::any_of(life_given_.begin(), life_given_.end(),
+                               [component](const LifeGiven& g) { return g.component == component; });
+        });
+#endif
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
         sync_.SetPlayer(player);
         NoteOurLinkHit();  // row 230: a Redead's or Gibdo's scream on our Link (its Life step's hits)
@@ -4907,6 +5014,20 @@ private:
             }
         }
         sync_.SetRallyMakers(RallyMakers(rally_balls));  // row 211: for this walk's Tick (AttackWithRally)
+        // Rows 177/211: a boss ball our Link sent back is answered by its maker's own AI here (RallyReturnedTo).
+        // NoteOwnHit lets only a copy run its own (an owner's own AI runs anyway); each walk the ball flies back
+        // again keeps it so, and its knockdown is then its own stun (NoteOwnStun), whose DAMAGE 0 hands him to us.
+        for (const u64 boss : RallyReturnedTo(out, RallyMakers(rally_returned))) {
+            CoopBossNative::TheTable().NoteOwnHit(boss, true);
+        }
+        for (std::size_t i = 0; i < rally_returned_at.size(); ++i) {
+            if (std::find(rally_said_.begin(), rally_said_.end(), rally_returned_at[i]) == rally_said_.end()) {
+                LOG_INFO(Core, "coop: objects: {} {:#x} sent back by our Link: its maker answers it with its own AI "
+                               "here (rows 177/211)",
+                         rally_returned[i], rally_returned_at[i]);
+            }
+        }
+        rally_said_ = std::move(rally_returned_at);
         if (debug_) {  // research: the field grass that is no actor (world.md)
             for (const std::string& line : foliage_.Look(
                      [&r](u64 address) { return r.Get<u64>(address); }, main_, player)) {
@@ -5795,7 +5916,7 @@ private:
             if (!life_table_full_said_) {
                 life_table_full_said_ = true;
                 LOG_WARNING(Core, "coop: objects: no room to give a hit to the game's Life step ({:#x} '{}'): "
-                                  "until the next scene an enemy's is lost, anything else's life written",
+                                  "while its table is full an enemy's is lost, anything else's life written",
                             w.address, NameOf(w.address));
             }
 #endif
@@ -6469,7 +6590,11 @@ private:
             if (IsShared(actor.name)) {  // enemies and breakables
                 Life(r, a, actor);
             }
-            if (actor.name.find("PivotedFloor") != std::string::npos) {
+            // Known issue (PR #315 catch-up): a ceiling Gold Skulltula that turns to a player stays still on the
+            // other screen. The same yaw note in every game (owner and copy) tells whether its actor turn (+0x328)
+            // turns in the owner's game and whether the copy's follows; no yaw line while it visibly turns: the
+            // turn is not the actor's (a bone or look IK).
+            if (actor.name.find("PivotedFloor") != std::string::npos || actor.name == "Enemy_Skulltula_Gold") {
                 TurnNote(r, a, actor);
             }
             if (actor.name.starts_with("Enemy_ReDead") || actor.name.starts_with("Enemy_Gibdo")) {
@@ -6741,6 +6866,7 @@ private:
     // Difficulty: this scene visit's extra enemies (where from the game's placement data).
     CoopDifficulty::Extras extras_{CoopDifficulty::AreaOf, SpecialForExtras};
     CoopDifficulty::Horde horde_;    // difficulty: the night horde we made beside our own rolls
+    std::vector<u64> rally_said_;    // rows 177/211: the rally balls sent back by our Link in the last walk (said once)
     u64 share_now_us_ = 0;  // this Share's server time (WriteLife)
     // The scene the save's Gold Skulltula keys were fed for (issue 89, Share's
     // key scan): a scene's actors are made once, so one scan a scene is enough.
@@ -6765,6 +6891,7 @@ private:
         gold_sweep_.Reset();
     }
     Sync sync_;
+    CoopDigest::Log digest_;  // sync digest lines (Share)
     Kernel::KProcess* process_ = nullptr;
     u64 main_ = 0;
     bool first_ = true;  // Walk()'s first pass (debug only): no "+" lines for what was there already

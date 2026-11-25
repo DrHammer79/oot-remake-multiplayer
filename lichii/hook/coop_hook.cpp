@@ -808,6 +808,9 @@ public:
             Log(event);
         }
         CoopPuppet::OnEvent(event);
+        if (!left) {
+            CoopEmote::OnEvent(event, client);  // a call (/here) is read in the chat too (coop_emote_game.h)
+        }
         CoopPose::OnEvent(event, SteadyMs());
         if (!left) {
             Chat(event, client);
@@ -1262,7 +1265,8 @@ public:
             lent_keys_.forget();  // dungeon-sync-b: the save has its own key counts
             start_source_.Reset();  // deku-sync-fix: what the game asked before the load is not ours now
             story_source_.Reset();
-            coop::host::map_drop_log().note("save load seen (" + std::to_string(report.save_load_flags) + " flags back)");
+            coop::host::map_drop_log().game_reset("save load seen (" + std::to_string(report.save_load_flags) +
+                                                  " flags back)");
         }
         // deku-dungeon-2 (DUNGEON_EVENT, issues 176 and 196): a gimmick event
         // our game starts goes out at once, and another player's start is
@@ -1947,7 +1951,13 @@ public:
         CoopRide::Frame(system, view.game ? base_ : 0, report.connected ? session_.get() : nullptr,
                         view.scene, event, view.position,
                         reading ? reading->rotation : std::nullopt,
-                        reading ? reading->animation : std::nullopt, report.server_now_us);
+                        reading ? reading->animation : std::nullopt, report.server_now_us,
+                        // epona-sync: Get_Epona (Enum 0x92431c55) at Complete (0x4c0a63f4): Epona is this
+                        // game's own, so she is sent while nobody rides her too (coop_ride.h).
+                        [&memory]() {
+                            return memory && coop::host::GameFlags(*memory).get_enum(0x92431c55u) ==
+                                                 std::optional<std::uint32_t>{0x4c0a63f4u};
+                        });
         // Race mode (coop/protocol/race.hpp): the world's parts run as alone, so this game owns all its enemies,
         // bosses, drops, spawns and its clock; the players still see each other, chat and talk.
         coop::host::Session* const world = report.connected && !report.race ? session_.get() : nullptr;
@@ -3747,7 +3757,7 @@ void KeepMapsAlone(EmulatorMemory& memory, bool in_play, const std::optional<std
     coop::host::GameFlagStore flags(memory);
     const coop::host::MapDropBecause because("the solo keeper (minimap-b)");
     const auto restored = keeper.frame(flags, in_play, coop::host::view_of(scene));
-    if (keeper.take_save_load()) coop::host::map_drop_log().note("save load (no scene for a while: the title)");
+    if (keeper.take_save_load()) coop::host::map_drop_log().game_reset("save load (no scene for a while: the title)");
     if (keeper.take_hud_refresh() && StartMapRefresh()) CoopMapRefresh::TheRefresher().WantNow(SteadyMs());  // rows 140, 183
     for (const auto key : restored) {
         const auto* item = coop::host::find_item(key.hash);
@@ -3770,6 +3780,10 @@ void WatchMapDrops(EmulatorMemory& memory, bool in_play, const std::optional<std
     for (const auto& line : coop::host::map_drop_log().frame(
              flags, coop::host::view_of(scene), in_play, link)) {
         LOG_WARNING(Core, "{}", line);
+    }
+    // Row 269: the game's own clear at a save load or the title is no drop in play: information.
+    for (const auto& line : coop::host::map_drop_log().take_info()) {
+        LOG_INFO(Core, "{}", line);
     }
 }
 

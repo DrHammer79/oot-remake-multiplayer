@@ -60,8 +60,8 @@ constexpr std::array<Shot, 5> kBossShots{{
 // Ganondorf's and Ganon's balls, shocks and shockwaves, King Dodongo's fire breath, and the Moblin's club
 // shockwave (a ground wave like Phantom Ganon's).
 // FlareDancer_Bullet_ (FireBall, FireDanceBall, made by Enemy_MiddleBoss_FlareDancer_FireBody; enemy survey
-// 2026-11-21). PoeHyrule_Bullet_ (the Poe's fireball) the same: each player gets their own. Gohma's eggs
-// (made minions), Volvagia's rocks (the arena's, each game's own) and the beams are not shots. Never split: Octorok_Bullet and ScrubDeku_DekuNut (the player shot at sends them back).
+// 2026-11-21). PoeHyrule_Bullet_ (the Poe's fireball) the same: each player gets their own. Gohma has no shot
+// (her ActorHolderParam makes only Enemy_DungeonBoss_Gohma_Egg: made minions), Volvagia's rocks (the arena's, each game's own) and the beams are not shots. Never split: Octorok_Bullet and ScrubDeku_DekuNut (the player shot at sends them back).
 constexpr std::array<std::string_view, 13> kSplit{{"PhantomGanon_Bullet_Thunder", "DungeonBossPhantomGanon_Bullet_",
                                                     "DungeonBossGanondrof_Bullet_", "Twinrova_Bullet_",
                                                     "KotakeKoumeTwinrova_Bullet_", "Ganondorf_Bullet_", "Ganon_Bullet_",

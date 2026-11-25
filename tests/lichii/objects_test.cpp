@@ -3656,14 +3656,18 @@ TEST_CASE("objects: group rules for parts and bosses") {
 }
 
 TEST_CASE("ai-turns: TurnsAsEnemy lists the big melee kinds only, never a boss or part") {
+    // Every variant of these kinds the game has (romfs Pack/Actor, 2026-11-24).
     for (const char* name : {"Enemy_Moblin", "Enemy_Moblin_Club", "Enemy_Lizalfos", "Enemy_Dinolfos", "Enemy_Stalfos",
-                             "Enemy_Stalfos_Weak", "Enemy_LikeLike", "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black"}) {
+                             "Enemy_Stalfos_Weak", "Enemy_Stalfos_ForChild", "Enemy_Stalfos_AlwaysRespawn",
+                             "Enemy_LikeLike", "Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_White",
+                             "Enemy_IronKnuckle_Silver"}) {
         CAPTURE(name);
         CHECK(CoopObjects::TurnsAsEnemy(name));
         CHECK_FALSE(CoopObjects::IsBossOrPart(name));
     }
     for (const char* name : {"Enemy_Keese", "Enemy_Tektite", "Enemy_Poe_Amy", "Enemy_Dodongo", "Enemy_Ganondorf",
-                             "Enemy_Wolfos_White", "Enemy_Anubis", ""}) {
+                             "Enemy_Wolfos_White", "Enemy_Anubis", "Enemy_Stalfos_Haribote", "Enemy_Dinolfos_Haribote",
+                             "Enemy_MoblinClub_ShockWave", "Enemy_Moblin_Dictionary", "Enemy_IronKnuckle", ""}) {
         CAPTURE(name);
         CHECK_FALSE(CoopObjects::TurnsAsEnemy(name));
     }
@@ -5216,6 +5220,41 @@ TEST_CASE("objects: a plain enemy's copy stunned here sends a DAMAGE of 0 and ke
     wish.stun_plain = true;
     CHECK(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
     CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Down_Start"));
+    // geno-polish-ai: one stun rule on both sides. The owner's own Down is no plain stun: it is not put over ours;
+    // the owner's own stun is (both games show one stun).
+    wish.name = "Down_Start";
+    CHECK(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
+    wish.name = "StunA_St";
+    CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
+}
+
+// geno-polish-ai: the owner's plain enemy in its own Down (a life hit there, its own move) is in no stun, so our copy's
+// own stun still asks for it. Before, the owner's animation was read with the boss rule (Down counts) and kept it.
+TEST_CASE("objects: a plain enemy's copy stunned here asks while the owner's is in its own Down (ai-stuns)") {
+    const std::string lizalfos = "Enemy_Lizalfos";
+    Sync owner;
+    Seen e = Enemy(0x100, 0x11, 6, 0.0f, lizalfos);
+    e.animation = proto::Animation{"Down_Start", 10.0f, 1.0f};
+    Tick(owner, 0, {e});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Own(owner, id, 1, 3);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 10 * kMs, {e}));
+    REQUIRE(samples.size() == 1);
+
+    Sync copy;
+    Seen c = Enemy(0x200, 0x11, 6, 0.0f, lizalfos);
+    c.animation = proto::Animation{"Down_Start", 10.0f, 1.0f};
+    Tick(copy, 0, {c}, 2);
+    Own(copy, id, 1, 3);
+    proto::ObjectSample s = samples[0];
+    s.player_number = 1;
+    s.state.time = {1000 * kMs, 1};
+    copy.Receive(s);
+    Tick(copy, 1010 * kMs, {c}, 2);
+    c.animation = proto::Animation{"StunA_St", 0.0f, 1.0f};
+    const auto damage = All<proto::Damage>(Tick(copy, 1100 * kMs, {c}, 2));
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].amount == 0);
 }
 
 // ai-stuns (NEXT33 lane run): another player's nut, shown here as a copy, bursts here too and stuns our copy. That
@@ -8339,6 +8378,36 @@ TEST_CASE("row 211: a boss's attack goes on while a rally ball of its own flies 
     }
 }
 
+TEST_CASE("rows 177/211: a rally ball our Link sent back is answered by its maker's own AI: which bosses") {
+    // Proof run 20261123-083911: the copy's own 'Parry02_Ready' was played over by the owner's 'Parry', 0 own stuns.
+    // The walk hands the makers of the balls our Link sent back; each boss in Seen that made one gets its own time
+    // (NoteOwnHit, which lets only a copy run its own), once each.
+    using CoopObjects::RallyMakers;
+    using CoopObjects::RallyReturnedTo;
+    const Seen dorf = Enemy(0x100, 0x11, 70, 0.0f, "Enemy_DungeonBoss_Ganondorf");
+    const Seen phantom = Enemy(0x200, 0x12, 70, 0.0f, "Enemy_DungeonBoss_PhantomGanon");
+    const Seen twinrova = Enemy(0x300, 0x13, 70, 0.0f, "Enemy_DungeonBoss_Twinrova");
+    const Seen baba = Enemy(0x400, 0x14, 4, 0.0f, "Enemy_DekuBaba");
+    const std::vector<Seen> seen{dorf, phantom, twinrova, baba, dorf};
+    // Nothing sent back: nobody.
+    CHECK(RallyReturnedTo(seen, RallyMakers({})).empty());
+    // His light ball and his charge ball: Ganondorf (and Phantom Ganon, the ball's other maker in the table), once.
+    for (const char* ball : {"DungeonBossGanondrof_Bullet_LightBall", "DungeonBossGanondrof_Bullet_ChargeLightBall"}) {
+        CAPTURE(ball);
+        CHECK(RallyReturnedTo(seen, RallyMakers({ball, ball})) == std::vector<std::uint64_t>{0x100, 0x200});
+        CHECK(RallyReturnedTo({dorf}, RallyMakers({ball})) == std::vector<std::uint64_t>{0x100});
+    }
+    // Phantom Ganon's own ball (stage 2): only him.
+    CHECK(RallyReturnedTo(seen, RallyMakers({"DungeonBossPhantomGanon_Bullet_LightBall"})) ==
+          std::vector<std::uint64_t>{0x200});
+    // A shot nobody rallies is no rally ball, so never handed in: no own time from it.
+    CHECK(RallyReturnedTo(seen, RallyMakers({"PhantomGanon_Bullet_Thunder", "Octorok_Bullet"})).empty());
+    // An unread actor (address 0) is skipped.
+    CHECK(RallyReturnedTo({Enemy(0, 0x11, 70, 0.0f, "Enemy_DungeonBoss_Ganondorf")},
+                          RallyMakers({"DungeonBossGanondrof_Bullet_LightBall"}))
+              .empty());
+}
+
 TEST_CASE("row 211: the sync holds a boss's attack from the walk's rally balls (no shared object: never in Seen)") {
     // Proof run 20261123-045939: the ball is no shared object, so RallyMakers over Seen never saw it and the hold
     // never came on. The walk hands the makers in (SetRallyMakers) before each Tick.
@@ -8899,4 +8968,73 @@ TEST_CASE("objects: a copy made ours gets its AI's old choice back, not our earl
     c.Saw(0x30, "Eat_Start", "", "Eat_Loop", 1'000);
     c.Drop(0x30);
     CHECK_FALSE(c.Take(0x30).has_value());
+}
+
+TEST_CASE("objects: the sync digest lists shared objects only, by id, with the owner's life for a copy") {
+    Sync sync;
+    Tick(sync, 0, {Enemy(0x100, 0x11, 2), Enemy(0x200, 0x22, 2)});
+    CHECK(sync.DigestEntries().empty());  // no owner news yet: not shared
+    Own(sync, *sync.IdOf(0x100), 1, 3);
+    Own(sync, *sync.IdOf(0x200), 2);
+    Tick(sync, 100 * kMs, {Enemy(0x100, 0x11, 1), Enemy(0x200, 0x22, 2)});
+    const auto entries = sync.DigestEntries();
+    REQUIRE(entries.size() == 2);
+    const auto field = [](const CoopDigest::Entry& e, const std::string& key) {
+        for (const auto& [k, v] : e.fields) {
+            if (k == key) return v;
+        }
+        return std::string("(none)");
+    };
+    CHECK(entries[0].id.value == 0x11);
+    CHECK(field(entries[0], "name") == "Enemy_Stalchild");
+    CHECK(field(entries[0], "owner") == "1");
+    CHECK(field(entries[0], "epoch") == "3");
+    CHECK(field(entries[0], "life") == "1");
+    CHECK(field(entries[0], "dead") == "0");
+    CHECK(field(entries[0], "local.owner_life") == "(none)");  // ours: no owner samples
+    CHECK(entries[1].id.value == 0x22);
+    CHECK(field(entries[1], "owner") == "2");
+    CHECK(field(entries[1], "life") == "2");
+}
+
+TEST_CASE("objects: a boss sample with no shots clears the copy's owner shots (Twinrova hand-over)") {
+    const std::string twinrova = "Enemy_DungeonBoss_Twinrova";
+    Sync owner;
+    Seen e = Enemy(0x100, 0x11, 12, 0.0f, twinrova);
+    e.bsa = proto::BossBsa{1, 2, std::nullopt, {}};
+    e.shots = proto::BossShots{1, {{1, "Twinrova_Bullet_FireBullet", {1.0f, 2.0f, 3.0f}}}};
+    Tick(owner, 0, {e});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Own(owner, id, 1, 4);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 10 * kMs, {e}));
+    REQUIRE(samples.size() == 1);
+    REQUIRE(samples[0].state.shots);
+    // The owner's empty tail goes out too.
+    e.shots = proto::BossShots{1, {}};
+    e.bsa = proto::BossBsa{2, 3, std::nullopt, {}};
+    auto tail = All<proto::ObjectSample>(Tick(owner, 200 * kMs, {e}));
+    REQUIRE(tail.size() == 1);
+    REQUIRE(tail[0].state.shots);
+    CHECK(tail[0].state.shots->recent.empty());
+
+    Sync copy;
+    Seen c = Enemy(0x200, 0x11, 12, 0.0f, twinrova);
+    Tick(copy, 0, {c}, 2);
+    Own(copy, id, 1, 4);
+    proto::ObjectSample s = samples[0];
+    s.player_number = 1;
+    s.state.time = {1000 * kMs, 1};
+    copy.Receive(s);
+    Tick(copy, 1010 * kMs, {c}, 2);
+    auto in = copy.BossShotsIn();
+    REQUIRE(in.size() == 1);
+    CHECK(in[0].second.recent.size() == 1);
+    // The tail was missed: the next sample has no shots at all. None is awake there now.
+    s.state.shots.reset();
+    s.state.time = {1100 * kMs, 1};
+    copy.Receive(s);
+    Tick(copy, 1110 * kMs, {c}, 2);
+    in = copy.BossShotsIn();
+    REQUIRE(in.size() == 1);
+    CHECK(in[0].second.recent.empty());
 }

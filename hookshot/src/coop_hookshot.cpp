@@ -63,6 +63,8 @@
 #include "coop_actor_events.h"
 #include "coop_boss_native.h"
 #include "coop_boss_orders.h"
+#include "coop_boss_shots.h"
+#include "coop_every.h"
 #include "coop_boss_scenes.h"
 #include "coop_hallway.h"
 #include "coop_dbno_body.h"
@@ -465,6 +467,36 @@ void SetBossOrders() {
 }
 
 // Every 10 s while orders move: the counts (the probe run's lines).
+// Twinrova hand-over (coop_boss_shots.h): a copy fires the owner's shots. The shoot hook is patch 0007's.
+void SetBossShots() {
+    const bool on = Env("LICHII_COOP_BOSS_SHOTS") != "0";
+    CoopBossShots::Table& t = CoopBossShots::TheTable();
+    if (t.On() == on) {
+        return;
+    }
+    t.SetOn(on);
+    LOG_INFO(Core, "coop: bosses: Twinrova's shots {}", on ? "fired on the owner's word" : "each game's own AI's");
+}
+
+void LogBossShots() {
+    static std::uint64_t said_ms = 0;
+    static CoopBossShots::Counts said{};
+    const std::uint64_t now = SteadyMs();
+    if (now - said_ms < 10'000) {
+        return;
+    }
+    const CoopBossShots::Counts c = CoopBossShots::TheTable().GetCounts();
+    if (c.owner_kept == said.owner_kept && c.copy_stopped == said.copy_stopped && c.fired == said.fired &&
+        c.dropped == said.dropped && c.restarts == said.restarts && c.missed == said.missed) {
+        return;
+    }
+    said_ms = now;
+    said = c;
+    LOG_INFO(Core, "coop: bosses: shots: ours sent {}; copies: {} owner's fired, {} own stopped, {} dropped, {} "
+                   "started again; {} bullets missed (slot changed before their actor was read)",
+             c.owner_kept, c.fired, c.copy_stopped, c.dropped, c.restarts, c.missed);
+}
+
 void LogBossOrders() {
     static std::uint64_t said_ms = 0;
     static CoopBossOrders::Counts said{};
@@ -512,7 +544,8 @@ void LogBossNative() {
         c.variant_named == said.variant_named && c.variant_plain == said.variant_plain &&
         c.variant_node_moved == said.variant_node_moved && c.variant_node_conflict == said.variant_node_conflict &&
         c.copy_own_move == said.copy_own_move && c.owner_move_left == said.owner_move_left &&
-        c.owner_variants == said.owner_variants) {
+        c.owner_variants == said.owner_variants && c.own_starts_held == said.own_starts_held &&
+        c.own_start_reasks == said.own_start_reasks && c.made_ours_own_other == said.made_ours_own_other) {
         return;
     }
     said_ms = now;
@@ -525,13 +558,16 @@ void LogBossNative() {
                    "owner's brain verbs given to copies {} ({} the copy was in already); variations put in: {} named, {} "
                    "plain, {} not known, {} past the name pools; {} through another node (the move's chose another "
                    "variation), {} with no such node left (row 222); {} own asks of the owner's move run ({} renamed to its "
-                   "variation), {} owner's repeats left out; owner's variations kept {} (plug names read {}, not read {})",
+                   "variation), {} owner's repeats left out; owner's variations kept {} (plug names read {}, not read {}); "
+                   "own starts held {} (asked again {}, {} reached the cap, {} met the owner's move), {} made ours "
+                   "with its own AI in another move",
              c.owner_brain, c.owner_action, c.plug_actions, c.copy_skipped, c.brain_applied, c.action_applied,
              c.action_waiting, c.action_slot_busy, c.action_busy_again, c.copy_own_run, c.copy_own_late, c.copy_shot_hits, c.copy_own_stuns, c.copy_hits_to_owner, c.minions_stopped, c.copy_life_held,
              c.copy_killed, c.copy_finished, c.plain_wants, c.plain_wakes, c.plain_deaths, c.body_deaths, c.brain_came,
              c.brain_already, c.variant_named, c.variant_plain, c.variant_unknown, c.variant_pool_full,
              c.variant_node_moved, c.variant_node_conflict, c.copy_own_move, c.own_move_renamed, c.owner_move_left, c.owner_variants, g_plug_read.load(),
-             g_plug_unread.load());
+             g_plug_unread.load(), c.own_starts_held, c.own_start_reasks, c.own_start_holds_capped,
+             c.own_start_holds_met, c.made_ours_own_other);
 }
 
 // ---- Name tags on the game's own balloons (coop_native_tags.h, B3 of reports/ui-audit-01112.md), at the frame hook.
@@ -673,7 +709,11 @@ constexpr std::uint64_t kAutoSaveKindEvent = 5;        // EventTriggerRequestAut
 constexpr std::uint64_t kAutoSaveMgrState = 0x130;     // mgr: -> the state the request marks (0 before it is made)
 
 void RequestHostAutoSave(void* ctx) {
-    if (!CoopSave::TakeSaveRequest()) return;
+    const auto request = CoopSave::TakeSaveRequest();
+    if (request == CoopSave::SaveRequest::none) return;
+    // (the test commands' `autosave`, rejoin-host-273-2: the same call; no guest waits for it)
+    const bool test = request == CoopSave::SaveRequest::test;
+    const char* const without = test ? "the test's autosave is not asked" : "the guests get our last save on disk";
     const std::uint64_t base = CoopRuntime::MainBase();
     const auto read64 = [](std::uint64_t at) {
         std::uint64_t v = 0;
@@ -682,7 +722,7 @@ void RequestHostAutoSave(void* ctx) {
     const std::uint64_t got = read64(base + kGameSystemGot);
     const std::uint64_t system = got != 0 ? read64(got) : 0;
     if (system == 0) {
-        LOG_WARNING(Core, "coop: save: our game has no game system yet: the guests get our last save on disk");
+        LOG_WARNING(Core, "coop: save: our game has no game system yet: {}", without);
         return;
     }
     HosCoopCall k{};
@@ -691,7 +731,7 @@ void RequestHostAutoSave(void* ctx) {
     k.x[1] = kAutoSaveMgrIndex;
     std::uint64_t mgr = 0;
     if (!g_api->call(ctx, &k, &mgr) || mgr == 0 || read64(mgr + kAutoSaveMgrState) == 0) {
-        LOG_WARNING(Core, "coop: save: our game's autosave manager is not there: the guests get our last save on disk");
+        LOG_WARNING(Core, "coop: save: our game's autosave manager is not there: {}", without);
         return;
     }
     k = HosCoopCall{};
@@ -701,7 +741,12 @@ void RequestHostAutoSave(void* ctx) {
     k.x[2] = 0;
     std::uint64_t x0 = 0;
     if (!g_api->call(ctx, &k, &x0)) {
-        LOG_WARNING(Core, "coop: no game function at {:#x}: the guests get our last save on disk", k.function);
+        LOG_WARNING(Core, "coop: no game function at {:#x}: {}", k.function, without);
+        return;
+    }
+    if (test) {
+        LOG_INFO(Core, "coop: save: asked our game for its own autosave (an event's end request), for the test "
+                       "commands' autosave: the game's own gate may refuse it");
         return;
     }
     LOG_INFO(Core, "coop: save: asked our game for its own autosave (an event's end request): the guests' send waits "
@@ -1610,8 +1655,21 @@ bool Start(const HosCoopApi* api) {
     }
     // Original game (coop_original.h): the module stays off, all of it, and Longshot's F1 menu gets one tab with the
     // switch alone, so the player can turn it back.
-    if (const auto options = CoopTitle::KitOptionsFile();
-        options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions())) {
+    // The mods list in step with the switch first (CoopOriginal::Sync: a list an older kit wrote, the switch set or
+    // taken out by hand in coop-options.ini; report 266), for the next start: Longshot read the list before the module.
+    const auto options = CoopTitle::KitOptionsFile();
+    const bool original = options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions());
+    if (options) {
+        bool changed = false;
+        std::string why;
+        if (!CoopOriginal::Sync(CoopRuntime::GameDir() / "mods", original, changed, why)) {
+            LOG_WARNING(Core, "coop: original game: the mods list is not in step with the switch: {}", why);
+        } else if (changed) {
+            LOG_INFO(Core, "coop: original game {}: the mods list put in step with it (from the next start)",
+                     original ? "on" : "off");
+        }
+    }
+    if (original) {
         g_original.Open(*options, CoopRuntime::GameDir() / "mods");
         g_original_on = true;
         LOG_INFO(Core, "coop: original game ({}): the module stays off; F1's \"Original game\" tab turns it back",
@@ -1744,6 +1802,12 @@ void Frame(void* ctx, int site) {
         CoopPlaytest::AtFrame();
     }
     CoopWindowBrand::Tick(CoopRuntime::GameDir());  // the window's title and icon, co-op on or idle (solo too)
+    if (site == HOS_COOP_SITE_FRAME) {  // row 271: this game's memory once a minute, solo too (coop_host_menu.h)
+        static std::uint64_t next_memory_ms = 0;
+        if (CoopHostMenu::MemoryLineDue(SteadyMs(), next_memory_ms)) {
+            LOG_INFO(Core, "coop: memory: {}", CoopHostMenu::ProcessMemoryText());
+        }
+    }
     if (!g_on) {
         return;
     }
@@ -1789,6 +1853,7 @@ void Frame(void* ctx, int site) {
         NativeTags(ctx);            // the name tags on the game's balloons (coop_native_tags.h)
         LogBossNative();
         LogBossOrders();
+        LogBossShots();
         CoopMapPage::Frame(ctx, g_api);   // the Map page's panes, found once while the game plays
         if (const auto menu = CoopMapPage::MenuState()) {  // minimap-b: the drop log's menu state (patch 0018)
             coop::host::map_drop_log().set_menu(menu->menu_open, menu->map_page);
@@ -1822,6 +1887,7 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         g_world_wraps.store(level.wraps);
         SetBossNative();
         SetBossOrders();
+        SetBossShots();
         if (g_world_version.exchange(level.version) != level.version) {
             LOG_INFO(Core, "coop: world hooks: hookshot.exe has level {} (this module {}), wraps {:#x}{}", level.version,
                      HOS_COOP_WORLD_VERSION, level.wraps,
@@ -1919,6 +1985,11 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
                         (CoopEnemyShots::StopAtCreate(name, {place[0], place[1], place[2]}, shot ? shooter : 0) ||
                          // Native boss sync: a copy boss's own minion (the owner's comes as a copy).
                          CoopBossNative::TheTable().CopyMakes(CoopObjects::MinionMaker(name)));
+        // Twinrova hand-over: her bullets are made here once and woken later; their handles are kept
+        // (coop_boss_shots.h). b: where the game keeps the request.
+        if (!t_create_stop && CoopBossShots::IsBullet(name) && CoopBossShots::TheTable().On()) {
+            CoopBossShots::TheTable().KeepBullet(b, name);
+        }
         if (t_create_stop) {
             e.flags |= CoopActorEvents::kStopped;
         }
@@ -2280,7 +2351,8 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             }
         }
         std::optional<CoopBossNative::Request> renamed;
-        if (!t.OnActionVerb(x[0], r, (x[2] & 1) != 0, t_own_call, std::move(plug_name), &renamed)) {
+        std::uint64_t answer = CoopBossNative::addr::kActionTaken;
+        if (!t.OnActionVerb(x[0], r, (x[2] & 1) != 0, t_own_call, std::move(plug_name), &renamed, &answer)) {
             if (renamed) {
                 // Row 222: a copy's own ask of the owner's move, run with the owner's variation: its plug and
                 // has-plug set before the game reads the request (0x38..0x40).
@@ -2291,8 +2363,9 @@ int Wrap(std::uint32_t id, int phase, std::uint64_t* x, void* /*ctx*/) {
             return 0;
         }
         // Skipped: the result its callers pass up is what the game gives for a request it took (0, its main path
-        // main+0xc10f4; 2 and 3 are its refusals), so the asking node goes on as after its own request.
-        x[0] = CoopBossNative::addr::kActionTaken;
+        // main+0xc10f4; 2 and 3 are its refusals), so the asking node goes on as after its own request. A copy's own
+        // start held (Twinrova hand-over) answers 3, the slot busy: its node asks again.
+        x[0] = answer;
         return 1;
     }
     if (id == HOS_COOP_WRAP_TIME_SET && phase == 0) {
@@ -2529,7 +2602,11 @@ void DressCharacters(void* ctx) {
         const auto part = CoopLook::PartOf(number);
         return part ? shown[*part] : std::nullopt;
     });
-    if (own.eyes || own.hair || character != 0) {
+    // (and Link once he has worn a colour: back to none, the wardrobe puts the game's own back. Without him as a
+    // target it never saw the change, and Game's own colour left the last colour on him)
+    static bool own_worn = false;
+    own_worn = own_worn || own.eyes || own.hair;
+    if (own_worn || character != 0) {
         // (the model key: the actor name and the character shown, ModelKey, so another pick or age is looked up anew;
         // `picture`: dressed only on the Customize screen, its rows are the page's)
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
@@ -2824,6 +2901,14 @@ COOP_HOOKSHOT_EXPORT int hos_coop_mouse(float fx, float fy, int event) {
     static CoopBoundary::Site site{"hos_coop_mouse"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
         return CoopHookshot::Mouse(fx, fy, event) ? 1 : 0;
+    });
+}
+// The game's menu mouse held off while co-op presses the menu's buttons for the player (coop_auto_press.h; Longshot
+// patch 0030's oot_menu.c asks each menu frame): 1 = held, the mouse neither points nor clicks.
+COOP_HOOKSHOT_EXPORT int hos_coop_menu_mouse_held(void) noexcept {
+    static CoopBoundary::Site site{"hos_coop_menu_mouse_held"};
+    return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
+        return g_on && CoopTitle::MenuMouseHeld() ? 1 : 0;
     });
 }
 // Drawing over the picture (hos_coop_draw.h), on Hookshot's render thread.

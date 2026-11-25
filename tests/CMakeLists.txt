@@ -105,12 +105,14 @@ add_executable(coop_tests
   lichii/testinput_test.cpp
   lichii/time_test.cpp
   lichii/every_test.cpp
+  lichii/digest_test.cpp
   lichii/hud_test.cpp
   lichii/game_build_test.cpp
   lichii/game_scan_test.cpp
   lichii/boss_test.cpp
   lichii/boss_beaten_test.cpp
   lichii/boss_native_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_native.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_shots.cpp
   lichii/boss_orders_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_orders.cpp
   lichii/boss_scenes_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../lichii/hook/coop_boss_scenes.cpp
   lichii/teleport_test.cpp
@@ -240,6 +242,7 @@ target_sources(coop_tests PRIVATE hookshot/module_test.cpp hookshot/draw_test.cp
   hookshot/title_native_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_title_native.cpp
   hookshot/problem_ask_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../hookshot/src/coop_problem_ask.cpp
   hookshot/stuck_load_test.cpp
+  hookshot/auto_press_test.cpp
   hookshot/text_fit_test.cpp
   hookshot/list_pages_test.cpp
   hookshot/menu_nav_test.cpp

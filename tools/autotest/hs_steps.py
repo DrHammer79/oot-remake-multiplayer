@@ -32,10 +32,13 @@ counts match is PASS only when its see= checks are all OK (FAIL when a shot show
 Log-only steps by nature: `try` (a join's outcome: a connection result) and `lines` (counts log lines); a run made of
 them alone still needs its group line's see= or logonly= (groups.py).
 The server's join password comes from the environment variable OOT_COOP_TEST_PASSWORD (run.ps1 -ServerPassword).
+Unset, `run` makes a random one for the run (ensure_server_password) and gives it to the server and to every game: every
+session has a join password (coop_server does not start without one; a game without the server's is refused).
 """
 import argparse
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -71,6 +74,17 @@ class Step:
         return "Step(%d, %r, %r)" % (self.n, self.verb, self.args)
 
 
+def ensure_server_password(environ):
+    """The run's join password in environ["OOT_COOP_TEST_PASSWORD"]: kept when set (run.ps1 -ServerPassword, a
+    wrapper's own), else a random one made here, so the server (--password-env) and the games (Runner's default
+    password, LICHII_COOP_PASSWORD) always get the same one. A wrapper that called `run` without it started a server
+    with no password, which coop_server refuses (rejoin-host-273's harness gaps). True when one was made."""
+    if environ.get("OOT_COOP_TEST_PASSWORD"):
+        return False
+    environ["OOT_COOP_TEST_PASSWORD"] = "autotest-" + secrets.token_hex(8)
+    return True
+
+
 def _game(n, x):
     if x not in ("A", "B"):
         raise StepsError("line %d: %r is not a game (A or B)" % (n, x))
@@ -86,7 +100,7 @@ def parse_steps(text):
             continue
         w = line.split()
         verb, rest = w[0], w[1:]
-        if verb in ("start", "load"):
+        if verb in ("start", "launch", "load"):
             if not rest:
                 raise StepsError("line %d: %s A [B]" % (n, verb))
             steps.append(Step(n, verb, [_game(n, x) for x in rest], line))
@@ -291,6 +305,13 @@ class Runner:
         for x in s.args:
             self.g.wait_joined(x)
 
+    def do_launch(self, s):
+        # like start, but only until each game draws: for a game that starts before the server (no welcome yet)
+        for x in s.args:
+            self.g.start(x, self.password(x), wait=False)
+        for x in s.args:
+            self.g.wait_joined(x, join=False)
+
     def do_load(self, s):
         for x, ok, why in self.g.load(s.args):
             if not ok:
@@ -394,8 +415,8 @@ class DryGames:
     def start(self, x, password, wait=True):
         self.say("  would start %s (save baseline back, fresh log%s)" % (x, ", join password set" if password else ""))
 
-    def wait_joined(self, x):
-        self.say("  would wait for %s: '%s'" % (x, JOINED))
+    def wait_joined(self, x, join=True):
+        self.say("  would wait for %s: %s" % (x, "'%s'" % JOINED if join else "its renderer only"))
 
     def load(self, xs):
         self.say("  would load %s (title to the save)" % " ".join(xs))
@@ -584,7 +605,7 @@ class HookshotGames:
         if wait:
             self.wait_joined(x)
 
-    def wait_joined(self, x):
+    def wait_joined(self, x, join=True):
         # Drawing first: a game whose shaders still compile reads no controller and joins only after (a cold driver
         # cache: minutes, its length not fixed), so this wait follows the compile's progress (hookshot.wait_renderer)
         # and the join's own timeout counts from there.
@@ -593,6 +614,8 @@ class HookshotGames:
         self.say("%s: renderer ready (%.0f s waited)" % (x, waited))
         if getattr(self.hk, "place_games", None):   # (the game can move its window when its renderer comes up)
             self.hk.place_games({x: self.procs[x].pid}, self.display, self.say)
+        if not join:
+            return
         t0 = time.monotonic()
         while JOINED not in self.log(x):
             if not self.alive(x):
@@ -693,9 +716,8 @@ class HookshotGames:
             return
         self.server_runs += 1
         sfx = "-%d" % self.server_runs if self.server_runs > 1 else ""
-        args = [self.server_exe, "--port", str(self.port)]
-        if os.environ.get("OOT_COOP_TEST_PASSWORD"):
-            args += ["--password-env", "OOT_COOP_TEST_PASSWORD"]
+        # (always set by main: ensure_server_password; the games send the same one)
+        args = [self.server_exe, "--port", str(self.port), "--password-env", "OOT_COOP_TEST_PASSWORD"]
         args += self.head.get("server", [])   # the steps file's `#! server` arguments
         env = None
         if self.server_delay:
@@ -793,13 +815,16 @@ def main(argv=None):
         print("hs_steps.py: %s: %s" % (a.steps, e))
         return 1
     head = parse_header(text)
-    if a.dry_run:
-        print("steps %s: %d steps; games %s / %s; server %s port %d%s; pipes %s-A/-B; out %s" % (
+    if a.dry_run:   # (nothing set: a dry run starts nothing)
+        print("steps %s: %d steps; games %s / %s; server %s port %d, %s; pipes %s-A/-B; out %s" % (
             a.steps, len(steps), a.game_a, a.game_b, a.server, a.port,
-            ", join password from OOT_COOP_TEST_PASSWORD" if os.environ.get("OOT_COOP_TEST_PASSWORD") else "",
-            a.pipe, a.out))
+            "join password from OOT_COOP_TEST_PASSWORD" if os.environ.get("OOT_COOP_TEST_PASSWORD")
+            else "a random join password would be made for the run (OOT_COOP_TEST_PASSWORD is unset)", a.pipe, a.out))
         _dry(steps)
         return 0
+    made = ensure_server_password(os.environ)   # (before the server and the Runner read it)
+    password_note = ("a random join password made for this run (OOT_COOP_TEST_PASSWORD was unset)" if made
+                     else "join password from OOT_COOP_TEST_PASSWORD")
     os.makedirs(a.out, exist_ok=True)
     sys.path.insert(0, HERE)
     import hookshot as hk  # noqa: E402 (tools/autotest/hookshot.py: the bridge, the player, the load)
@@ -813,7 +838,10 @@ def main(argv=None):
         say("window placement: %s" % e)
         return 2
     if mon:
+        if mon.get("note"):
+            say("window placement: %s" % mon["note"])
         say("windows go to %s (work area %s)" % (mon["name"], mon["work"]))
+    say("server and games: %s" % password_note)
     games.server_delay = hk.test_delay_args(a.test_delay_ms, a.test_jitter_ms)
     games.renderer = (a.renderer_wait or games.timeout, a.renderer_stall or hk.RENDERER_STALL,
                       a.renderer_limit or hk.RENDERER_LIMIT)
@@ -835,7 +863,7 @@ def _dry(steps):
     games = DryGames(say)
     for s in steps:
         say("step %d: %s" % (s.n, s.line))
-        if s.verb == "start":
+        if s.verb in ("start", "launch"):
             for x in s.args:
                 games.start(x, "")
         elif s.verb == "load":

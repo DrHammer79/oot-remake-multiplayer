@@ -220,7 +220,7 @@ void Joined() {
 }
 
 // What co-op is doing, for the tab.
-std::string ShareCode(const HosCoopStatus& st);   // (below: the code a host gives its friends)
+std::string ShareCode(const HosCoopStatus& st, bool copied);   // (below: the code a host gives its friends)
 
 CoopPauseMenu::Session SessionNow() {
     const HosCoopStatus st = Status();
@@ -240,7 +240,7 @@ CoopPauseMenu::Session SessionNow() {
     s.by_launcher = g_coop_on;
     if (s.hosting) {
         s.players = st.players;
-        s.code = ShareCode(st);
+        s.code = ShareCode(st, false);   // (shown: never with the join password)
         s.code_done = st.invite_done != 0;
         // (the Host page's Join password row, shown on A, and its Let in and Refuse rows; the password is never logged)
         if (st.state == HOS_COOP_HOSTING) s.password.assign(st.password, strnlen(st.password, sizeof st.password));
@@ -363,13 +363,18 @@ std::string g_name_suffix;
 int g_name_tries = 0;
 bool g_name_retry = false;   // (the Join now is that one: its suffix kept)
 
-// The code a host gives its friends: its room on the relay ("<room>@<relay>"), else the relay's join code
-// ("<CODE>@<relay>"), else the invite code; "" none yet. Join takes each of them.
+// The code a host gives its friends (CoopTitleMenu::HostShareText): its room on the relay ("<room>@<relay>"), else the
+// relay's join code ("<CODE>@<relay>"), else the invite code; "" none yet. Join takes each of them. `copied` (the
+// clipboard): the join password after a relay line, so a friend's paste joins (a line without it never did); shown on
+// the Host page: bare (the password only when the player asks for it).
 constexpr std::uint64_t kRelayWaitMs = 6000;
-std::string ShareCode(const HosCoopStatus& st) {
-    if (st.relay_room[0] != 0) return std::string(st.relay_room, strnlen(st.relay_room, sizeof st.relay_room));
-    if (st.relay_code[0] != 0) return std::string(st.relay_code, strnlen(st.relay_code, sizeof st.relay_code));
-    return std::string(st.invite, strnlen(st.invite, sizeof st.invite));
+std::string ShareCode(const HosCoopStatus& st, bool copied) {
+    return CoopTitleMenu::HostShareText(std::string_view(st.relay_room, strnlen(st.relay_room, sizeof st.relay_room)),
+                                        std::string_view(st.relay_code, strnlen(st.relay_code, sizeof st.relay_code)),
+                                        std::string_view(st.invite, strnlen(st.invite, sizeof st.invite)),
+                                        copied ? std::string_view(st.password, strnlen(st.password, sizeof st.password))
+                                               : std::string_view(),
+                                        copied);
 }
 
 // What follows from co-op's state, whether the tab is shown or not: the code to give friends on the clipboard once
@@ -387,7 +392,7 @@ void Follow(const HosCoopStatus& st) {
     if (waited_session != session) waited_session = session, wait_from = NowMs();
     const bool relay_in = st.relay_room[0] != 0 || st.relay_code[0] != 0;
     const bool relay_out = st.problem == HOS_COOP_PROBLEM_RELAY_FAILED || NowMs() - wait_from > kRelayWaitMs;
-    const std::string share = ShareCode(st);
+    const std::string share = ShareCode(st, true);
     if (host && !share.empty() && (relay_in || relay_out) && !g_copied && !g_copy_tried) {
 #ifndef _WIN32
         g_copy_tried = true;   // one try per code (Windows tries again each round: a busy clipboard frees up)
@@ -1799,6 +1804,14 @@ void JoinPasteNow() {
             SayOnPage(kSayRefused);
             return;
         }
+        if (CoopTitleMenu::RelayLineWithoutPassword(line)) {
+            // (an older host's room line: the room, not its password; Join alone would only say "type the password")
+            LOG_INFO(Core, "coop: multiplayer tab: join: the pasted relay line has no join password after it");
+            g_menu.SetNote({"That room line has no password after it. Ask the host for the join password, then "
+                            "type the room and the password in Join a game."});
+            SayOnPage(kSayRefused);
+            return;
+        }
         if (!Join(line)) SayOnPage(kSayRefused);
     });
 }
@@ -1969,7 +1982,7 @@ void PageCopyNow(PageCopy what) {
     switch (what) {
     case PageCopy::kCode:
         // (a relay room's name first: friends type it; then the relay's join code, then the invite code)
-        text = st.relay_room[0] != 0 ? st.relay_room : st.relay_code[0] != 0 ? st.relay_code : st.invite;
+        text = ShareCode(st, true);   // (a relay line with the join password after it: a friend's paste joins at once)
         words = st.relay_room[0] != 0 ? "room name" : st.relay_code[0] != 0 ? "join code" : "invite code";
         break;
     case PageCopy::kAnswer:
@@ -2022,7 +2035,7 @@ std::string PageSays(std::uint64_t* gen) {
 }
 
 // The autotest's in-game host (CoopHostMenu::ParseTestHost): the Multiplayer page's Host, on the harness's port and
-// password, a private game with no relay, router port or invite. The host thread listens on 127.0.0.1 only.
+// password, a private game with no router port or invite, and no relay unless the harness names its relay room. The host thread listens on 127.0.0.1 only.
 bool TestHost() {
     const char* text = std::getenv(CoopHostMenu::kTestHostEnv);
     const auto test = text != nullptr ? CoopHostMenu::ParseTestHost(text) : std::nullopt;
@@ -2045,6 +2058,20 @@ bool TestHost() {
     o.relay_key.clear();
     o.relay_room.clear();
     o.list_room = false;
+    // (the harness's relay room, both or neither: a private room on its loopback relay, as a player's Room name row)
+    const char* relay = std::getenv(CoopHostMenu::kTestRelayEnv);
+    const char* room = std::getenv(CoopHostMenu::kTestRelayRoomEnv);
+    if (relay != nullptr || room != nullptr) {
+        if (relay == nullptr || room == nullptr || *relay == 0 || !CoopTitleMenu::RelayOk(relay) ||
+            !CoopTitleMenu::RoomNameOk(room)) {
+            LOG_WARNING(Core, "coop: multiplayer tab: test host: {} and {} want a relay host:port and a room name: not hosting",
+                        CoopHostMenu::kTestRelayEnv, CoopHostMenu::kTestRelayRoomEnv);
+            return false;
+        }
+        o.relay = relay;
+        o.relay_room = room;
+        LOG_INFO(Core, "coop: multiplayer tab: test host: private room {} on relay {}", o.relay_room, o.relay);
+    }
     LOG_INFO(Core, "coop: multiplayer tab: test host on port {} (Multiplayer > Host, as the page's Host row)", o.host_port);
     return Host(o, true);
 }
@@ -2068,6 +2095,10 @@ CoopMenuState::Tab MenuTab() {
 bool TestMenu(const std::string& page) {
     if (page == "host") {
         return TestHost();
+    }
+    if (page == "paste") {   // (the Multiplayer page's "Paste code and join", with this PC's clipboard)
+        JoinPasteNow();
+        return true;
     }
     if (page == "customize") {
         Open(CoopPauseMenu::Page::kCustomize);
