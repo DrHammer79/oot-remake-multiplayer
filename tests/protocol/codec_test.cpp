@@ -3120,8 +3120,9 @@ TEST_CASE("pvp on real bodies: types 540 to 542, round-trip and refuse bad value
   CHECK(set_sender(answered, 2));
 }
 
-TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1)") {
-  CHECK(kProtocolVersion == 18);  // one bump for the whole sync plan: 26-28 kept by the server
+TEST_CASE("object components 25-28 carry keyed values (protocol 18, sync plan S1)") {
+  CHECK(kProtocolVersion == 18);  // one bump for the whole sync plan: 25-28 kept by the server
+  CHECK(static_cast<int>(ObjectComponent::brain) == 25);
   CHECK(static_cast<int>(ObjectComponent::plugs) == 26);
   CHECK(static_cast<int>(ObjectComponent::clocks) == 27);
   CHECK(static_cast<int>(ObjectComponent::events) == 28);
@@ -3130,6 +3131,7 @@ TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1
   s.state.plugs = KeyedValues{true, {{7, 1, std::int32_t{1}}, {7, 2, std::int32_t{-5}}, {9, 1, 2.5f}}};
   s.state.clocks = KeyedValues{false, {{3, 0xc0, Vec3{1, 2, 3}}, {3, 0xc4, KeyedRemove{}}}};
   s.state.events = KeyedValues{true, {{0x1234567890abcdefull, 0xffffffffu, std::uint64_t{123456789012}}}};
+  s.state.brain = KeyedValues{false, {{0, 0x9e3779b9u, std::int32_t{3}}, {0, 0xa1b2c3d4u, std::int32_t{1}}}};
   const Bytes bytes = must_encode(s);
   Message back;
   REQUIRE(decode(bytes, back) == Error::none);
@@ -3139,6 +3141,7 @@ TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1
   older.state.plugs.reset();
   older.state.clocks.reset();
   older.state.events.reset();
+  older.state.brain.reset();
   Bytes probe = bytes;
   int patched = 0;
   // The time component comes first (4 + 12 bytes after the message header); walk the component headers.
@@ -3146,13 +3149,13 @@ TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1
   for (std::size_t at = header.size(); at + 4 <= probe.size();) {
     const std::uint16_t id = static_cast<std::uint16_t>(probe[at] | (probe[at + 1] << 8));
     const std::uint16_t length = static_cast<std::uint16_t>(probe[at + 2] | (probe[at + 3] << 8));
-    if (id >= 26 && id <= 28) {
-      probe[at] = static_cast<std::uint8_t>(id + 4);  // 30-32: ids no build knows
+    if (id >= 25 && id <= 28) {
+      probe[at] = static_cast<std::uint8_t>(id + 5);  // 30-33: ids no build knows
       ++patched;
     }
     at += 4 + length;
   }
-  CHECK(patched == 3);
+  CHECK(patched == 4);
   REQUIRE(decode(probe, back) == Error::none);
   CHECK(std::get<ObjectSample>(back) == older);
   // Refused: keys not rising or twice, a remove in a full list, a float not finite, more than kMaxKeyedValues.
@@ -3160,6 +3163,7 @@ TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1
   ObjectSample bad = s;
   bad.state.clocks.reset();
   bad.state.events.reset();
+  bad.state.brain.reset();
   bad.state.plugs = KeyedValues{false, {{7, 2, std::int32_t{1}}, {7, 1, std::int32_t{1}}}};
   CHECK(encode(bad, out) == Error::bad_value);
   bad.state.plugs = KeyedValues{false, {{7, 1, std::int32_t{1}}, {7, 1, std::int32_t{2}}}};
@@ -3210,12 +3214,14 @@ TEST_CASE("keyed values merge: a full list replaces, a delta changes the keys it
   ObjectState old;
   old.plugs = kept;
   old.events = KeyedValues{true, {{9, 9, std::uint64_t{1}}}};
+  old.brain = KeyedValues{true, {{0, 5, std::int32_t{2}}}};
   ObjectState next;
   next.plugs = KeyedValues{false, {{2, 1, KeyedRemove{}}}};
   next.position = Vec3{1, 2, 3};
   CHECK(KeepKeyed(&old, next) == 0);
   CHECK(next.plugs == KeyedValues{true, {{1, 1, std::int32_t{1}}, {1, 2, std::int32_t{2}}}});
   CHECK(next.events == old.events);
+  CHECK(next.brain == old.brain);
   CHECK_FALSE(next.clocks);
   CHECK(next.position == Vec3{1, 2, 3});
 }

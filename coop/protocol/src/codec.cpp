@@ -653,7 +653,7 @@ void write_object_id(const ObjectId& id, Writer& w) {
   w.u64(id.value);
 }
 
-// Components 26-28 (KeyedValues): keys rising (owner, then name), each once; no remove in a full list; finite.
+// Components 25-28 (KeyedValues): keys rising (owner, then name), each once; no remove in a full list; finite.
 bool keyed_before(const KeyedValue& a, const KeyedValue& b) {
   return a.owner != b.owner ? a.owner < b.owner : a.name < b.name;
 }
@@ -726,7 +726,7 @@ Error check_object_state(const ObjectState& s) {
       before = v.seq;
     }
   }
-  for (const auto* k : {&s.plugs, &s.clocks, &s.events}) {
+  for (const auto* k : {&s.brain, &s.plugs, &s.clocks, &s.events}) {
     if (*k) COOP_TRY(check_keyed(**k));
   }
   if (s.orders) {
@@ -885,6 +885,7 @@ void write_object_state(const ObjectState& s, Writer& w) {
       }
     });
   }
+  if (s.brain) component(ObjectComponent::brain, [&] { write_keyed(*s.brain, w); });
   if (s.plugs) component(ObjectComponent::plugs, [&] { write_keyed(*s.plugs, w); });
   if (s.clocks) component(ObjectComponent::clocks, [&] { write_keyed(*s.clocks, w); });
   if (s.events) component(ObjectComponent::events, [&] { write_keyed(*s.events, w); });
@@ -930,6 +931,7 @@ std::size_t KeepKeyed(const ObjectState* kept, ObjectState& s) {
     }
     s.*list = MergeKeyed(old && *old ? &**old : nullptr, *(s.*list), dropped);
   };
+  keep(&ObjectState::brain);
   keep(&ObjectState::plugs);
   keep(&ObjectState::clocks);
   keep(&ObjectState::events);
@@ -1732,6 +1734,8 @@ Error decode_component(ObjectComponent id, Reader& c, ObjectState& s, bool& know
       }
       return Error::none;
     }
+    case ObjectComponent::brain:
+      return read_keyed(c, s.brain.emplace());
     case ObjectComponent::plugs:
       return read_keyed(c, s.plugs.emplace());
     case ObjectComponent::clocks:

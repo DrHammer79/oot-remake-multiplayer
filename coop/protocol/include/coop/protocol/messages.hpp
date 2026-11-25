@@ -32,10 +32,10 @@ namespace coop::protocol {
 // 16: OBJECT_SAMPLE component 23, a battle manager's orders (BossOrders, row 222 Twinrova, 0.11.11): a protocol 15
 // server keeps only the components it knows in an object's last state (HANDOVER_STATE), and a 0.11.9 game's copies
 // would follow their own manager again, so mixed versions are refused at HELLO.
-// 18: OBJECT_SAMPLE components 26-28, an object's kept keyed values (KeyedValues, sync plan S1, 0.11.13): one bump
+// 18: OBJECT_SAMPLE components 25-28, an object's kept keyed values (KeyedValues, sync plan S1, 0.11.13): one bump
 // for the whole sync plan. A protocol 17 server drops them from an object's last state, so a new owner or a late
 // player would get none of them; mixed versions are refused at HELLO. Nobody else bumps the version in 0.11.13: new
-// keyed data goes in 26-28 under new keys (docs/protocol.md "Keyed values").
+// keyed data goes in 25-28 under new keys (docs/protocol.md "Keyed values").
 inline constexpr std::uint16_t kProtocolVersion = 18;
 // A public game (anyone joins without typing a password) lists itself on the relay's room list with this bit
 // on top of kProtocolVersion; the relay repeats the version as given. A listing without it is a private game
@@ -865,8 +865,9 @@ enum class ObjectComponent : std::uint16_t {
   strike = 22,  // row 230: a Redead's or Gibdo's scream that froze the owner's Link (ObjectStrike below)
   orders = 23,  // protocol 16, row 222: the battle manager's orders this enemy took (BossOrders below)
   variants = 24,  // row 222 part 2: the variation (plug name) of the owner's boss actions (BossVariants below)
-  // 25 is kd-roll-149's board (sync plan S2). 26-28: protocol 18, sync plan S1, keyed values (KeyedValues below)
-  // the server keeps and merges for every object without knowing what they mean.
+  // 25-28: protocol 18, sync plan S1, keyed values (KeyedValues below) the server keeps and merges for every object
+  // without knowing what they mean.
+  brain = 25,   // an actor's AI blackboard keys, by the hash of the game's key name (sync plan S2: row 149 and on)
   plugs = 26,   // a room's plugs: switches, torches, block seats, held floor switches (sync plan S4)
   clocks = 27,  // a room's platform clocks: mover words on the server clock (sync plan S4)
   events = 28,  // a room's running gimmick events, with their start time (sync plan S4/S6)
@@ -1029,9 +1030,9 @@ struct BossVariants {
 // Whether a plug name may go on the wire (empty, or 1 to kMaxBossVariantChars printable ASCII characters).
 bool ValidVariantName(std::string_view name);
 
-// Components 26-28 (protocol 18, sync plan S1): keyed values of an object, mostly a room's (docs/protocol.md "Keyed
+// Components 25-28 (protocol 18, sync plan S1): keyed values of an object (25 its AI blackboard; 26-28 a room's) (docs/protocol.md "Keyed
 // values"). A key is an owner (u64: a placement hash, or 0 for the object itself) and a name (u32: Murmur3 of the
-// game's own name for it: a plug, a word, an event). The server keeps one merged list per component in the object's
+// game's own name for it: a blackboard key, a plug, a word, an event). The server keeps one merged list per component in the object's
 // last state, so HANDOVER_STATE, a late player's OBJECT_SPAWN and a new owner all get every value: a full list
 // replaces it, a delta changes only the keys it names (remove takes a key away). Keys rise (owner, then name), each
 // once; a full list holds no remove; floats finite; at most kMaxKeyedValues, kept or sent.
@@ -1073,12 +1074,13 @@ struct ObjectState {
   std::optional<ObjectStrike> strike;               // row 230: the owner's Link frozen by its scream
   std::optional<BossOrders> orders;                 // protocol 16: its battle manager's orders (row 222)
   std::optional<BossVariants> variants;             // row 222 part 2: its owner's action variations (protocol 17)
-  std::optional<KeyedValues> plugs;                 // protocol 18 (sync plan S1): keyed values, components 26-28
+  std::optional<KeyedValues> brain;                 // protocol 18 (sync plan S1): keyed values, components 25-28
+  std::optional<KeyedValues> plugs;
   std::optional<KeyedValues> clocks;
   std::optional<KeyedValues> events;
   bool operator==(const ObjectState&) const = default;
 };
-// The server's keep rule for components 26-28: each of s's keyed lists merged onto kept's (MergeKeyed); a list s
+// The server's keep rule for components 25-28: each of s's keyed lists merged onto kept's (MergeKeyed); a list s
 // lacks stays as kept. Returns the keys left out (over kMaxKeyedValues).
 std::size_t KeepKeyed(const ObjectState* kept, ObjectState& s);
 

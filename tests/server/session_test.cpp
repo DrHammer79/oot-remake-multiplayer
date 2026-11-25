@@ -8840,7 +8840,7 @@ ObjectState keyed_state(float x, std::optional<KeyedValues> plugs) {
 }
 }  // namespace
 
-TEST_CASE("keyed values (components 26-28, protocol 18) are kept merged, relayed as sent, handed over") {
+TEST_CASE("keyed values (components 25-28, protocol 18) are kept merged, relayed as sent, handed over") {
   ObjectHarness h;
   h.receive(1, present_in("Graveyard", {placed(7)}), kChannelOwnership);
   h.receive(2, present_in("Graveyard", {placed(7)}), kChannelOwnership);
