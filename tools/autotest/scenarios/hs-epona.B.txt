@@ -14,6 +14,7 @@ mark start
 # game is made adult first (Sequence_IsChildhood 0), as hs-held-adult does.
 setflag Sequence_IsChildhood 0  # adult AFTER the save is loaded (run.ps1 loads it first): set at the
 # title, the save's load put the child age back and the warp landed in HyruleField_Child
+wait 60                 # the flag takes 30+ frames before the warp (kit_setup: Link loads at the flag's age)
 warp HyruleField_Adult HyruleField_FrontOfMarket
 wait 1200               # the warp lands
 mark field
