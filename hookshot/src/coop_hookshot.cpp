@@ -1766,6 +1766,12 @@ void Frame(void* ctx, int site) {
         CoopPlaytest::AtFrame();
     }
     CoopWindowBrand::Tick(CoopRuntime::GameDir());  // the window's title and icon, co-op on or idle (solo too)
+    if (site == HOS_COOP_SITE_FRAME) {  // row 271: this game's memory once a minute, solo too (coop_host_menu.h)
+        static std::uint64_t next_memory_ms = 0;
+        if (CoopHostMenu::MemoryLineDue(SteadyMs(), next_memory_ms)) {
+            LOG_INFO(Core, "coop: memory: {}", CoopHostMenu::ProcessMemoryText());
+        }
+    }
     if (!g_on) {
         return;
     }
