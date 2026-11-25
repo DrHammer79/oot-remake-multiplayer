@@ -66,6 +66,12 @@ var System = {
         },
         // FileAttributes as Jint may hand it over: a number (Directory 16, ReparsePoint 1024), or an object with
         // ToString (and valueOf: the number) or the enum's text, as attrMode says.
+        FileInfo: function (p) {
+            var f = fso.GetFile(p);
+            this.Length = f.Size;
+            this.LastWriteTimeUtc = String(f.DateLastModified);
+            this.Attributes = f.Attributes;
+        },
         DirectoryInfo: function (p) {
             var link = (fso.GetFolder(p).Attributes & 1024) !== 0, n = link ? 1040 : 16;
             var text = link ? "Directory, ReparsePoint" : "Directory";
@@ -117,6 +123,10 @@ writeFile(fso.BuildPath(game, "ngx\\nvngx_dlss.dll"), "dlss");
 mkdirs(fso.BuildPath(game, "logs"));
 writeFile(fso.BuildPath(game, "newfile.dll"), "new");
 writeFile(fso.BuildPath(game, "exefs_patches.txt"), "built with");
+mkdirs(fso.BuildPath(game, "texts"));                     // a folder a later build added
+writeFile(fso.BuildPath(game, "texts\en.txt"), "words");
+mkdirs(fso.BuildPath(game, "cache"));                     // the solo game's shader cache: each instance keeps its own
+writeFile(fso.BuildPath(game, "language.txt"), "solo");
 writeFile(fso.BuildPath(game, "coop.ini"), "own");
 writeFile(fso.BuildPath(game, "coop-saves.ini"), "solo");
 writeFile(fso.BuildPath(game, "coop-name-checked.txt"), "solo");
@@ -135,6 +145,11 @@ writeFile(fso.BuildPath(game, "logs\\longshot_log.txt"), "the game's own log");
 shell.Run("cmd /c mklink /J \"" + fso.BuildPath(instances[0], "logs") + "\" \"" + fso.BuildPath(game, "logs") + "\"", 0, true);
 mkdirs(fso.BuildPath(instances[2], "logs"));
 writeFile(fso.BuildPath(instances[2], "logs\\longshot_log.txt"), "player 3's log");
+// Instance 1 holds an old copy of a build file, and a file an older build had that the game folder no longer has.
+writeFile(fso.BuildPath(instances[1], "exefs_patches.txt"), "old build");
+writeFile(fso.BuildPath(instances[1], "gone.dll"), "old");
+writeFile(fso.BuildPath(instances[1], "coop-linked.txt"), "gone.dll\r\n");
+writeFile(fso.BuildPath(instances[1], "language.txt"), "player 2's");
 // Instance 1 has a real user folder from an earlier start (Nucleus copied it): kept beside, renamed.
 mkdirs(fso.BuildPath(instances[1], "user"));
 
@@ -210,6 +225,10 @@ for (var q = 0; q < 3; q++) {
 check(readFile(fso.BuildPath(instances[0], "ngx\\nvngx_dlss.dll")) === "dlss" && (fso.GetFolder(fso.BuildPath(instances[0], "ngx")).Attributes & 1024) !== 0, "ngx folder linked into an instance made before it");
 check(readFile(fso.BuildPath(instances[1], "newfile.dll")) === "new", "a new game DLL copied in");
 check(readFile(fso.BuildPath(instances[1], "exefs_patches.txt")) === "built with", "the build's mod code list copied in");
+check(readFile(fso.BuildPath(instances[0], "texts\en.txt")) === "words", "a folder a later build added is linked in");
+check(!fso.FolderExists(fso.BuildPath(instances[0], "cache")), "the game's cache is not taken");
+check(!fso.FileExists(fso.BuildPath(instances[1], "gone.dll")), "a copied file the game no longer has is removed");
+check(readFile(fso.BuildPath(instances[1], "language.txt")) === "player 2's", "a player's own setting is kept");
 check(!fso.FileExists(fso.BuildPath(instances[1], "coop-saves.ini")) && !fso.FileExists(fso.BuildPath(instances[1], "coop-name-checked.txt")), "per-player files the solo game wrote are not taken");
 check(!fso.FolderExists(fso.BuildPath(instances[0], "logs")), "logs stay the instance's own");
 var noted = readFile(fso.BuildPath(game, "nucleus-players\\instances.txt"));
