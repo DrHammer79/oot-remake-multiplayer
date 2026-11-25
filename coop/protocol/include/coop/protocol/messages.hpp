@@ -32,7 +32,9 @@ namespace coop::protocol {
 // 16: OBJECT_SAMPLE component 23, a battle manager's orders (BossOrders, row 222 Twinrova, 0.11.11): a protocol 15
 // server keeps only the components it knows in an object's last state (HANDOVER_STATE), and a 0.11.9 game's copies
 // would follow their own manager again, so mixed versions are refused at HELLO.
-inline constexpr std::uint16_t kProtocolVersion = 16;
+// 17: PLAYER_RIDE flag bit 1 (kRideFree) with a world place, a player's own Epona while nobody rides her
+// (epona-sync): a protocol 16 reader refuses the bit as bad_value, so mixed versions are refused at HELLO.
+inline constexpr std::uint16_t kProtocolVersion = 17;
 // A public game (anyone joins without typing a password) lists itself on the relay's room list with this bit
 // on top of kProtocolVersion; the relay repeats the version as given. A listing without it is a private game
 // (or an older kit's): the joiner asks for the host's password and never tries the public one on it.
@@ -467,16 +469,23 @@ struct Animation {
 // at the puppet's place plus `offset` (the horse's place minus the rider's,
 // metres), turned `rotation`, playing `animation` (the horse's AS slot 0).
 // Same player field rules as PLAYER_STATUS. Floats must be finite.
+// Protocol 17 (epona-sync): kRideFree, the player's own Epona while nobody
+// rides her (called with her song, waiting where the rider got off): the copy
+// is at `place` (the world, metres) turned `rotation` (the world), `offset`
+// zero. Never with kRideRiding. `place` is zero without kRideFree.
 inline constexpr std::uint8_t kRideRiding = 0x01;
+inline constexpr std::uint8_t kRideFree = 0x02;
 inline constexpr float kMaxRideOffset = 10.0f;  // each axis
+inline constexpr float kMaxRidePlace = 100000.0f;  // each axis
 inline constexpr std::size_t kMaxRideHorseChars = 64;
 struct PlayerRide {
   std::uint8_t player_number = kPlayerSelf;  // 0 from a client, 1 to 16 relayed
-  std::uint8_t flags = 0;                     // kRideRiding; other bits refused
+  std::uint8_t flags = 0;                     // kRideRiding or kRideFree; other bits refused
   std::string horse;                          // the horse's actor name; empty when off
   Vec3 offset{};
   Quat rotation{0.0f, 0.0f, 0.0f, 1.0f};
   std::optional<Animation> animation;
+  Vec3 place{};                               // kRideFree only: the horse's place in the world
   bool operator==(const PlayerRide&) const = default;
 };
 
