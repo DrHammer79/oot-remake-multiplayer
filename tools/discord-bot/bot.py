@@ -149,7 +149,7 @@ class ReportBot(discord.Client):
                 if report_id in self.intake_seen:
                     intake.Limits.release(taken)
                     return answer(200, ok=True, duplicate=True)
-                if core.over_budget(core.dir_size(self.logs_dir), len(data)):
+                if core.over_budget(core.stored_size(self.logs_dir), len(data)):
                     raise intake.Refused(503, "the report box is full; try again later", retry_after=3600)
                 number, folder = intake.save_upload(self.logs_dir, self.tracker, when, install, report_id, data, files)
                 self.intake_seen.add(report_id)
@@ -348,7 +348,7 @@ class ReportBot(discord.Client):
 
     async def _accept(self, interaction, user, description, logs, version):
         incoming = logs.size if logs is not None else 0
-        if core.over_budget(await asyncio.to_thread(core.dir_size, self.logs_dir), incoming):
+        if core.over_budget(await asyncio.to_thread(core.stored_size, self.logs_dir), incoming):
             log.warning("player-logs is over its %d MB budget; refused a report from %s",
                         core.LOGS_BUDGET_BYTES // (1024 * 1024), user.name)
             await self.refuse(interaction, "The report box is full right now; please try again later.")
@@ -374,7 +374,7 @@ class ReportBot(discord.Client):
         display = getattr(user, "display_name", None) or username
         try:
             async with self.lock:
-                if core.over_budget(core.dir_size(self.logs_dir), len(data) if data is not None else 0):
+                if core.over_budget(core.stored_size(self.logs_dir), len(data) if data is not None else 0):
                     await self.refuse(interaction, "The report box is full right now; please try again later.")
                     return False
                 number, folder = core.save_report(self.logs_dir, self.tracker, when, username, display, version,
