@@ -2190,12 +2190,13 @@ public:
                                        return CoopBossOrders::TheTable().Step(guest, after_call, result,
                                                                               TheBossMain().load());
                                    });
-                // Twinrova hand-over: the owner's shots fired by our copies (coop_boss_shots.h).
+                // Twinrova hand-over: our bullets' wakes, and the owner's shown by our copies (coop_boss_shots.h).
                 CoopSvc::AddCaller(CoopBossShots::Table::kCallerOrder,
                                    [](CoopPuppet::Guest& guest, bool after_call,
                                       std::uint64_t result, std::uint64_t) {
                                        return CoopBossShots::TheTable().Step(guest, after_call, result,
-                                                                             TheBossMain().load());
+                                                                             TheBossMain().load(),
+                                                                             CoopEvery::NowUs());
                                    });
                 CoopSvc::AddCaller(kGrassCallerOrder,
                                    [](CoopPuppet::Guest& guest, bool after_call,

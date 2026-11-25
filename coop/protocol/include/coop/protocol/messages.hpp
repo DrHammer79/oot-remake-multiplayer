@@ -860,7 +860,7 @@ enum class ObjectComponent : std::uint16_t {
   strike = 22,  // row 230: a Redead's or Gibdo's scream that froze the owner's Link (ObjectStrike below)
   orders = 23,  // protocol 16, row 222: the battle manager's orders this enemy took (BossOrders below)
   variants = 24,  // row 222 part 2: the variation (plug name) of the owner's boss actions (BossVariants below)
-  shots = 25,     // Twinrova hand-over: the shots the owner's boss fired through the game's shoot code (BossShots below)
+  shots = 25,     // Twinrova hand-over: the owner's boss's bullets awake now (BossShots below)
 };
 
 struct ObjectLife {
@@ -1020,26 +1020,20 @@ struct BossVariants {
 // Whether a plug name may go on the wire (empty, or 1 to kMaxBossVariantChars printable ASCII characters).
 bool ValidVariantName(std::string_view name);
 
-// Component 25 (Twinrova hand-over, no protocol bump: older builds skip it by its length): the shots the owner's boss
-// fired through the game's shoot code (main+0xc16cf0, called once per shooter record by the Shooter component's AI
-// step main+0x2eb07d0). A copy's own AI runs its moves on its own time and after hand-overs fired in other windows
-// than the owner's (NEXT49: 4 of 11), so a copy fires each of the owner's shots itself, through the same code with
-// the same arguments, and its own AI's shots are not made (coop_boss_shots.h). Each: seq (the owner's own count for
-// this boss, from 1), the bullet's name (1 to kMaxBossShotChars printable ASCII), the shooter map key and record
-// index it was fired from (Shooter +0x20's map, coop_shot_reflect.h), the shoot argument's Shootable_KeyHash (+8),
-// its w4 (+0xc) and OverrideParamNum (+0x10), and the flag byte the caller puts after the actor. recent holds the
-// shots of the last kBossShotKeepUs at most kMaxBossShots, oldest first.
+// Component 25 (Twinrova hand-over, no protocol bump: older builds skip it by its length): the owner's boss's
+// bullets in flight. Twinrova's bullets are made once at room load and kept (state 3); her AI fires one by waking it
+// (state 4, NEXT66), with no create. A copy's own AI wakes its bullets on its own time and after hand-overs in other
+// windows than the owner's (NEXT49: 4 of 11), so a copy wakes a kept bullet of the same name for each of the owner's
+// and moves it on the owner's places, and its own AI's wakes are put back (coop_boss_shots.h). Each: seq (the owner's
+// own wake count for this boss, from 1), the bullet's name (1 to kMaxBossShotChars printable ASCII) and its place now.
+// recent holds the bullets awake now, at most kMaxBossShots, oldest first; an empty list (sent for a while after the
+// last one ends) says none is.
 inline constexpr std::size_t kMaxBossShots = 8;
 inline constexpr std::size_t kMaxBossShotChars = 64;
 struct BossShot {
   std::uint32_t seq = 0;
   std::string name;
-  std::uint32_t key = 0;     // the shooter map slot's key
-  std::uint16_t index = 0;   // the record in that slot
-  std::uint32_t key_hash = 0;
-  std::uint32_t w4 = 0;
-  std::uint8_t param = 0;
-  std::uint8_t flag = 0;
+  Vec3 position{};
   bool operator==(const BossShot&) const = default;
 };
 struct BossShots {

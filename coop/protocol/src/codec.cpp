@@ -693,7 +693,9 @@ Error check_object_state(const ObjectState& s) {
     if (s.shots->recent.size() > kMaxBossShots) return Error::bad_value;
     std::uint32_t before = 0;
     for (const BossShot& o : s.shots->recent) {
-      if (o.seq == 0 || o.seq <= before || o.seq > s.shots->seq || !ValidShotName(o.name)) return Error::bad_value;
+      if (o.seq == 0 || o.seq <= before || o.seq > s.shots->seq || !ValidShotName(o.name) || !all_finite(o.position)) {
+        return Error::bad_value;
+      }
       before = o.seq;
     }
   }
@@ -840,12 +842,7 @@ void write_object_state(const ObjectState& s, Writer& w) {
       for (const BossShot& o : s.shots->recent) {
         w.u32(o.seq);
         w.str(o.name);
-        w.u32(o.key);
-        w.u16(o.index);
-        w.u32(o.key_hash);
-        w.u32(o.w4);
-        w.u8(o.param);
-        w.u8(o.flag);
+        for (float f : o.position) w.f32(f);
       }
     });
   }
@@ -1629,13 +1626,10 @@ Error decode_component(ObjectComponent id, Reader& c, ObjectState& s, bool& know
         BossShot& o = b.recent.emplace_back();
         COOP_READ(c.u32(o.seq));
         COOP_TRY(c.str(o.name, kMaxBossShotChars));
-        COOP_READ(c.u32(o.key));
-        COOP_READ(c.u16(o.index));
-        COOP_READ(c.u32(o.key_hash));
-        COOP_READ(c.u32(o.w4));
-        COOP_READ(c.u8(o.param));
-        COOP_READ(c.u8(o.flag));
-        if (o.seq == 0 || o.seq <= before || o.seq > b.seq || !ValidShotName(o.name)) return Error::bad_value;
+        for (float& f : o.position) COOP_READ(c.f32(f));
+        if (o.seq == 0 || o.seq <= before || o.seq > b.seq || !ValidShotName(o.name) || !all_finite(o.position)) {
+          return Error::bad_value;
+        }
         before = o.seq;
       }
       return Error::none;

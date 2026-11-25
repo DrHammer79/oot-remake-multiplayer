@@ -891,25 +891,29 @@ Item 3's hold did not bring the copy's bullets back in step: the copy's AI still
 bullets are split shots (each game keeps its own copy boss's bullet), so a copy whose AI missed the window showed the
 attack with no bullet. Now the bullet follows the owner's shot, not the copy's AI (`coop_boss_shots.h`):
 
-- The owner's game sees each shot its Twinrova fires through the game's shoot code (main+0xc16cf0, called by the
-  Shooter component's AI step main+0x2eb07d0 once per record), at patch 0007's SHOOT_FROM hook. It keeps the
-  bullet's name, the shoot values (Shootable_KeyHash, the next word, OverrideParamNum), the flag byte after the
-  actor, and the record's slot key and index in its own Shooter map. They go out in the boss's samples for 500 ms
-  (OBJECT_SAMPLE component 25 `shots`, no protocol bump).
-- A copy calls the same shoot code itself for each of the owner's shots, once, on its own record of that slot (by
-  its key, else by the slot's key hash), with the same values built in a block of guest memory. The call is ours,
-  so its bullet is never stopped.
-- Once the owner's first shot has come, the copy's own AI step's split shots from the shoot code are not made
-  (CREATE_REQUEST), so each owner shot is one bullet in every game. A split shot from the shoot code's other
-  callers is made as before (the owner sends only its AI step's). Before that (a new copy, an older owner) the
-  copy's own shots are made, as before.
-- A hand-over starts it again: the new owner's AI fires on its own, a game made a copy waits for the new owner's
-  first shot.
+Her bullets are not made when she fires. Each is made once at room load through a create request whose handle the
+game keeps, and stays kept (actor state 3, +0x2c). Her AI fires one by waking it (state 4); it goes back to 3 when it
+ends. In the fight there is no create and no call of the shoot code main+0xc16cf0 (NEXT65, NEXT66: the fight's
+bullets were the twelve made in the intro, by address). The game's own wake is a compare-and-swap of 3 to 4 in the
+actor manager (main+0x14acc).
+
+- Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST).
+- The owner's game reads its bullets every frame. A wake (3 to 4) is one shot. The bullets awake now, each with its
+  seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 25 `shots`, no protocol bump); an empty
+  list is sent for 500 ms after the last one ends.
+- A copy wakes a kept bullet of the same name for each new owner shot: the same 3 to 4 write, with the owner's place.
+  Every frame after that it puts the bullet on the owner's newest place, so it moves where the owner's does, and its
+  own collision still hits the copy's Link. When the owner's bullet ends, the copy's is put back to 3. One that hits
+  the copy's Link first ends there by itself.
+- Once the owner's first sample has come, a wake by the copy's own AI is put back to 3 on the next frame, so each
+  owner shot is one bullet in every game. Before that (a new copy, an older owner) the copy's own wakes stand.
+- A hand-over starts it again: bullets in flight finish on their own and are no one's shot; the new owner counts from
+  its next wake, and a game made a copy waits for the new owner's first sample.
 
 The log says `shots: the owner's came` per copy and a summary line every 10 s (`ours sent`, `owner's fired`, `own
-stopped`, `dropped`). `LICHII_COOP_BOSS_SHOTS=0` turns it off. Not yet known: whether the copy's Shooter has the
-slot when the owner fires (a shot with no record is dropped and logged). Tests: boss_native_test ("boss shots"),
-codec_test (component 25).
+stopped`, `dropped`). `LICHII_COOP_BOSS_SHOTS=0` turns it off. Not yet known: whether a bullet woken by our write
+(not the manager's) flies and hits as the game's own does; if not, the copy only shows it. Tests: boss_native_test
+("boss shots"), codec_test (component 25).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 
