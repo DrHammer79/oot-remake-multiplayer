@@ -797,6 +797,7 @@ void StartModule() {
     puppets.file = CopiesFile;
     puppets.base = CoopLookParts::kCopiesBase;
     puppets.start.clear();
+    puppets.target_in_memory = false;   // (row 198: the copies' memory holds the pack's; ptunics and boots too)
     puppets.what = "puppets' gear";
     // (0.11.9: the puppets' tunic copies, a Host of their own taken here, before `puppets` is moved below: the
     // lane crash of a178e8bd was a copy taken after that move, with no file and no log)
