@@ -15,7 +15,7 @@ the games go to the primary monitor (owner 2026-11-24: tests may use it) and the
 "note" that says which name was missing and which monitors exist. One rule for every caller (run.ps1, hookshot.py,
 hs_steps.py, live.py, the kit's play-test start and the offline scripts). With no monitor at all it is an error.
 The name is resolved to the monitor's work area (the screen minus the taskbar) when the games start, never as a
-fixed 0,0, so a display added later, or the same display after the layout moved, only needs the setting changed. 
+fixed 0,0, so a display added later, or the same display after the layout moved, only needs the setting changed.
 Windows are placed side by side from the work area's top left, 960x600 each (smaller when the work area is too small,
 so every window is fully on that monitor). Placing never activates a window (SWP_NOACTIVATE) and never restores a
 minimized one with a call that activates it.
@@ -83,8 +83,8 @@ PRIMARY = "primary"
 
 def find_monitor(monitors, name, primary_if_gone=False):
     """The monitor dict (name, work=(l, t, r, b), primary) called name ("primary": the primary monitor), or a
-    PlacementError that lists those found. primary_if_gone: a name no monitor has is the primary monitor (for the
-    default display, not one asked for: that monitor was unplugged or renumbered)."""
+    PlacementError that lists those found. primary_if_gone: a name no monitor has is the primary monitor (the
+    chosen monitor was unplugged or renumbered; check_display always asks for it)."""
     want = normalize(name)
     for m in monitors:
         if normalize(m["name"]) == want or (want == PRIMARY.upper() and m.get("primary")):

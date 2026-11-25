@@ -1265,6 +1265,16 @@ class WindowPlacementTest(unittest.TestCase):
             hs.place_games({"A": 1}, "DISPLAY9", said.append)
         self.assertEqual(said, ["window placement: no monitor"])
 
+    def test_the_placed_line_names_the_monitor_actually_used(self):
+        from unittest import mock
+        said = []
+        one = [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 1920, 1040), "primary": True}]
+        with mock.patch.object(hs, "WINDOWS", True),                 mock.patch.object(hs.placement, "monitors", lambda: one),                 mock.patch.object(hs.placement, "place_pids", return_value=[(1, (0, 0, 960, 600))]):
+            hs.place_games({"A": 1}, "DISPLAY2", said.append)
+        self.assertEqual(len(said), 1)
+        self.assertIn("on \\\\.\\DISPLAY1", said[0])
+        self.assertNotIn("DISPLAY2", said[0])
+
 
 class WarpSceneCheckTest(unittest.TestCase):
     """`warp Market` (the scenes are Market_Child and Market_Adult): the module's test warp refuses a scene it does not

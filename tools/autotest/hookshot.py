@@ -1111,9 +1111,10 @@ def place_games(pids, display, say, wait=0.0, topmost=False):
         say("window placement: %s" % e)
         return
     by_pid = {pids[x]: x for x in tags}
+    used = placement.check_display(display)["name"]   # (the monitor really used: the primary one after a fallback)
     for pid, rect in placed:
         say("%s: window placed at %d,%d %dx%d on %s" % (by_pid[pid], rect[0], rect[1], rect[2], rect[3],
-                                                         placement.display_name(display)))
+                                                         used))
 
 
 SAVE_USER = "5a3c9e1f0b7d24680000000000000001"   # the user folder a Hookshot game reads its saves from
