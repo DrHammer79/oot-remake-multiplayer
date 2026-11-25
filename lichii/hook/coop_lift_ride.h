@@ -80,7 +80,7 @@ inline constexpr float kStandRadiusM = 1.2f;
 inline constexpr float kStandBelowM = 0.5f;
 inline constexpr float kStandAboveM = 1.5f;
 
-// A step switch a player holds down by standing on it (Obj_*StepSwitch_*).
+// A step switch a player holds down by standing on it (Obj_*StepSwitch_* or Obj_*Stepswitch_*: the game has both).
 bool IsStandSwitch(std::string_view name);
 
 // The switches (of `switches`) with one of `others` standing on them.

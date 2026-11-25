@@ -656,10 +656,12 @@ bool IsBossOrPart(std::string_view name) {
 }
 
 bool TurnsAsEnemy(std::string_view name) {
+    // Every variant the game has (romfs Pack/Actor, 2026-11-24; not the _Dictionary display models, the _Haribote
+    // decoys or the club's shock wave). There is no plain "Enemy_IronKnuckle": each one is Black, White or Silver.
     static constexpr std::string_view kKinds[] = {
-        "Enemy_Moblin",     "Enemy_Moblin_Club",       "Enemy_Lizalfos",         "Enemy_Dinolfos",
-        "Enemy_Stalfos",    "Enemy_Stalfos_Weak",      "Enemy_Stalfos_ForChild", "Enemy_LikeLike",
-        "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_White", "Enemy_IronKnuckle_Silver",
+        "Enemy_Moblin",          "Enemy_Moblin_Club",        "Enemy_Lizalfos",          "Enemy_Dinolfos",
+        "Enemy_Stalfos",         "Enemy_Stalfos_Weak",       "Enemy_Stalfos_ForChild",  "Enemy_Stalfos_AlwaysRespawn",
+        "Enemy_LikeLike",        "Enemy_IronKnuckle_Black",  "Enemy_IronKnuckle_White", "Enemy_IronKnuckle_Silver",
     };
     return !IsBossOrPart(name) && std::find(std::begin(kKinds), std::end(kKinds), name) != std::end(kKinds);
 }
@@ -2438,13 +2440,15 @@ void Sync::Tick(const std::string& scene, std::uint8_t self, std::uint64_t now_u
         // ai-stuns: a plain enemy's copy the same (a nut, boomerang or hookshot stun here takes no life): the
         // server hands it to us, the stunner, whose enemy is the stunned one. Only a boss goes to the boss table.
         bool own_stun = false;
-        if (s.animation && IsStunAnimation(s.animation->name) && IsStunFor(s.name, s.animation->name)) {
+        if (s.animation && IsStunFor(s.name, s.animation->name)) {
             const auto owner = owners_.find(o.id);
             const std::string owners = !o.received.empty() && o.received.back().animation
                                            ? o.received.back().animation->name
                                            : std::string{};
             if (owner != owners_.end() && owner->second.player != 0 &&
-                owner->second.player != self && !IsStunAnimation(owners)) {
+                owner->second.player != self && !IsStunFor(s.name, owners)) {
+                // (One rule for both sides: a plain enemy's owner in its own Down or Fall is in no stun, so our
+                // copy's own stun still asks; before, the boss rule read the owner's and kept the enemy there.)
                 if (!(o.animation && IsStunFor(s.name, o.animation->name))) {
                     own_stun = true;
                     o.react_at = now_us;
@@ -4862,8 +4866,10 @@ bool CoversOwnReaction(const PlayWish& wish, std::string_view slot_name) {
     if (wish.keep_own_death && IsDeathAnimation(slot_name) && !IsDeathAnimation(wish.name)) {
         return true;
     }
-    const bool stunned = wish.stun_plain ? IsPlainStunAnimation(slot_name) : IsStunAnimation(slot_name);
-    return wish.keep_own_stun && stunned && !IsStunAnimation(wish.name);
+    const auto stun = [&wish](std::string_view name) {
+        return wish.stun_plain ? IsPlainStunAnimation(name) : IsStunAnimation(name);
+    };
+    return wish.keep_own_stun && stun(slot_name) && !stun(wish.name);
 }
 
 bool DeathReadFromAnimation(std::string_view name, bool reacts, bool life_read) {

@@ -1941,7 +1941,8 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
   }
 
   if (o.ask || o.root || o.projectile || o.fish || busy(c) || !has_loaded(id, o)) return;
-  if (o.changed_at != 0 && now_us - o.changed_at < config_.handover_cooldown_us) return;
+  const std::uint64_t cooldown_us = d.amount == 0 ? config_.stun_handover_cooldown_us : config_.handover_cooldown_us;
+  if (o.changed_at != 0 && now_us - o.changed_at < cooldown_us) return;
   auto owner = connections_.find(*o.owner);
   if (owner == connections_.end()) return;
   auto mine = distance_to(c, o, now_us);
@@ -1957,8 +1958,8 @@ void Session::on_damage(ConnectionId id, Connection& c, Damage& d, std::uint64_t
   }
   // ai-stuns: a stun on a copy (a nut, boomerang or hookshot: a DAMAGE of 0) is in the stunner's game only, and
   // the owner's enemy goes on attacking. The stunner within handover_near_m takes it, whatever the margin, the
-  // hand-back or the sticky-target rule (the stun is a player's own act, sent at most every 2 s; the 5 s
-  // cooldown above still holds), and every game then follows its stunned enemy.
+  // hand-back or the sticky-target rule (the stun is a player's own act, sent at most every 2 s; only the
+  // 1 s stun_handover_cooldown_us above holds, not the 5 s one), and every game then follows its stunned enemy.
   if (d.amount == 0) {
     if (mine && *mine <= config_.handover_near_m &&
         ask_handover(d.id, o, id, now_us, "a stun by a copy (ai-stuns)")) {
