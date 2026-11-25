@@ -287,6 +287,10 @@ class ParseTest(unittest.TestCase):
         steps = hs.parse("menu Customize\nmenu close\nmenu Host\n")
         self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host")])
         self.assertIn("menu", hs.MODULE_ONLY)
+        self.assertIn("autosave", hs.MODULE_ONLY)   # rejoin-host-273-2: the game's own autosave, asked
+        self.assertEqual(hs.parse("autosave\n")[0].kind, "autosave")
+        with self.assertRaises(hs.ScriptError):
+            hs.parse("autosave now\n")
 
     def test_host_in_game_env(self):  # row 260: A hosts through its own Multiplayer > Host
         self.assertEqual(hs.host_in_game_env(27520, "autotest-pass"),
