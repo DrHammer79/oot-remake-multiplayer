@@ -502,54 +502,87 @@ function coopTell(text) {
 }
 
 // Nucleus links the game's files into an instance folder only when it makes the folder, and the folders are kept
-// (Game.KeepSymLinkOnExit). What a later build adds is missing there. Named, not "whatever is new": the solo game
-// also writes per-player files beside its exe (coop-saves.ini, coop-name-checked.txt, ...), which must stay each
-// instance's own. So at every start: the ngx folder (NVIDIA DLSS's runtime, built in by "NVIDIA DLSS.bat"; the game
-// looks for it beside its exe, so in the instance) is linked in as a junction (always the game's current one), and each
-// build DLL the instance lacks is copied in. A DLL the handler copied is copied again at every start (a rebuild
-// replaces the file, and a copy would keep the old bytes); those are listed in the instance's coop-linked.txt.
-// exefs_patches.txt goes the same way: the build's list of the mods' code built into the exe. Without it the game
-// takes a mod with code (Character Select) as not built in and turns it off: its tab shows, but cannot be opened.
-var COOP_LINK_DIRS = ["ngx"];
+// (Game.KeepSymLinkOnExit). What a later build adds or replaces would be missing or old there. So at every start the
+// instance takes the game folder as it is now:
+// - a folder the instance lacks is linked in as a junction (always the game's current one): ngx, texts, prompts, ...;
+// - a file the instance lacks, or holds as its own copy with other bytes, is copied in (Nucleus's own links already
+//   show the current file);
+// - a file the handler copied that the game folder no longer has is removed (listed in coop-linked.txt).
+// Each player's own files and folders are never touched: what the game writes beside its exe (settings, the player
+// key, the co-op options and saves list, caches, logs) and the folders Game.DirExclusions names.
+var COOP_OWN_DIRS = /^(user|nucleus-players|logs|cache|modcache|gold-race|bug-reports)$/i;
+var COOP_OWN_FILES = /^(.*\.ini|player-key\.txt|language\.txt|coop-linked\.txt|coop-(?!built-from\.txt$).*\.txt)$/i;
+function coopSameFile(a, b) {
+    try {
+        var fa = new System.IO.FileInfo(a), fb = new System.IO.FileInfo(b);
+        return Number(fa.Length) === Number(fb.Length) &&
+               String(fa.LastWriteTimeUtc) === String(fb.LastWriteTimeUtc);
+    } catch (e) {
+        return false;
+    }
+}
+function coopFileIsLink(p) {
+    try {
+        var a = new System.IO.FileInfo(p).Attributes, n = Number(a);
+        if (!isNaN(n)) {
+            return (n & 1024) !== 0;
+        }
+        return String(a.ToString ? a.ToString() : a).indexOf("ReparsePoint") >= 0;
+    } catch (e) {
+        return false;
+    }
+}
 function coopLinkMissing(game, inst) {
-    var i, name, from, to;
-    for (i = 0; i < COOP_LINK_DIRS.length; i++) {
-        name = COOP_LINK_DIRS[i];
-        from = coopPath(game, name);
+    var i, n, name, from, to;
+    var dirs = System.IO.Directory.GetDirectories(game);
+    n = dirs.Length !== undefined ? dirs.Length : dirs.length;
+    for (i = 0; i < n; i++) {
+        from = String(dirs[i]);
+        name = String(System.IO.Path.GetFileName(from));
         to = coopPath(inst, name);
-        if (System.IO.Directory.Exists(from) && !System.IO.Directory.Exists(to)) {
+        if (!COOP_OWN_DIRS.test(name) && !System.IO.Directory.Exists(to) && !System.IO.File.Exists(to)) {
             coopLinkFolder(to, from);
             Context.Log("OoT Co-op: linked the game's " + name + " folder into " + inst);
         }
     }
     var files = System.IO.Directory.GetFiles(game);
-    var nf = files.Length !== undefined ? files.Length : files.length;
-    var markFile = coopPath(inst, "coop-linked.txt"), marked = "\n" + coopRead(markFile).replace(/\r/g, "") + "\n";
-    var added = "";
-    for (i = 0; i < nf; i++) {
+    n = files.Length !== undefined ? files.Length : files.length;
+    var markFile = coopPath(inst, "coop-linked.txt");
+    var marked = coopRead(markFile).replace(/\r/g, "").split("\n"), now = {}, list = "";
+    for (i = 0; i < n; i++) {
         from = String(files[i]);
         name = String(System.IO.Path.GetFileName(from));
         to = coopPath(inst, name);
-        if (!/\.dll$/i.test(name) && !/^exefs_patches\.txt$/i.test(name)) {
+        if (COOP_OWN_FILES.test(name)) {
             continue;
         }
-        var mine = marked.indexOf("\n" + name + "\n") >= 0;
-        if (System.IO.File.Exists(to) && !mine) {
-            continue;   // Nucleus's own link or copy
+        now[name.toLowerCase()] = true;
+        if (System.IO.File.Exists(to) && (coopFileIsLink(to) || coopSameFile(from, to))) {
+            continue;   // Nucleus's link (the current file), or a copy that is current
         }
         try {
             System.IO.File.Copy(from, to, true);
-            if (!mine) {
-                added += name + "\r\n";
-                Context.Log("OoT Co-op: copied the game's " + name + " into " + inst);
-            }
+            Context.Log("OoT Co-op: copied the game's " + name + " into " + inst);
+            list += name + "\r\n";
         } catch (e) {
             Context.Log("OoT Co-op: could not copy " + name + " into " + inst + " (in use?): " + e);
         }
     }
-    if (added !== "") {
-        coopWrite(markFile, coopRead(markFile) + added);
+    for (i = 0; i < marked.length; i++) {
+        name = coopTrim(marked[i]);
+        if (name === "" || COOP_OWN_FILES.test(name)) {
+            continue;
+        }
+        if (now[name.toLowerCase()]) {
+            if (list.indexOf(name + "\r\n") < 0) {
+                list += name + "\r\n";
+            }
+        } else if (System.IO.File.Exists(coopPath(inst, name)) && !coopFileIsLink(coopPath(inst, name))) {
+            System.IO.File.Delete(coopPath(inst, name));
+            Context.Log("OoT Co-op: removed " + name + " from " + inst + " (no longer in the game folder)");
+        }
     }
+    coopWrite(markFile, list);
 }
 
 // Notes this player's instance folder in nucleus-players\instances.txt beside the game ("<player>=<folder>", one line
