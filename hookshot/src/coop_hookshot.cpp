@@ -1878,6 +1878,31 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
     case HOS_COOP_WORLD_SHOOT_FROM: {  // (a: its first 8 bytes are the shooter's actor)
         std::uint64_t actor = 0;
         t_shooter = a != 0 && CoopRuntime::Read(a, &actor, sizeof actor) ? actor : 0;
+        {  // PROBE (NEXT52, not for merge): the shoot code's arguments for Twinrova's shots
+            static std::atomic<int> probe_lines{0};
+            std::uint64_t name_ptr = 0;
+            char nm[40] = {};
+            if (actor != 0 && CoopRuntime::Read(actor + 0x260, &name_ptr, 8) && name_ptr != 0 &&
+                CoopRuntime::Read(name_ptr, nm, 39) && std::string_view(nm).starts_with("Enemy_DungeonBoss_Twin") &&
+                probe_lines.fetch_add(1) < 120) {
+                const std::uint64_t mb = CoopRuntime::MainBase();
+                std::uint64_t x1w[8] = {}, x0w[16] = {};
+                CoopRuntime::Read(a, x1w, sizeof x1w);
+                CoopRuntime::Read(b, x0w, sizeof x0w);
+                std::string s1, s0, ret;
+                for (auto w : x1w) s1 += fmt::format(" {:x}", w);
+                for (auto w : x0w) s0 += fmt::format(" {:x}", w);
+                // (return addresses on the stack below the argument: the callers of the shoot code)
+                std::uint64_t st[128] = {};
+                if (CoopRuntime::Read(a - sizeof st, st, sizeof st)) {
+                    for (int i = 0; i < 128; ++i) {
+                        if (st[i] >= mb && st[i] < mb + 0x5000000) ret += fmt::format(" -{:#x}:main+{:#x}", sizeof st - 8 * i, st[i] - mb);
+                    }
+                }
+                LOG_INFO(Core, "coop: PROBE shoot '{}' actor {:#x} x1 {:#x} (actor{:+#x}) x0 {:#x} (actor{:+#x}) x1w[{} ] x0w[{} ] stack[{} ]",
+                         nm, actor, a, static_cast<std::int64_t>(a - actor), b, static_cast<std::int64_t>(b - actor), s1, s0, ret);
+            }
+        }
         return 1;
     }
     case HOS_COOP_WORLD_CREATE_FROM: {  // (just before CREATE_REQUEST, on this thread)
