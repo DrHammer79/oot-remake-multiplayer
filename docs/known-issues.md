@@ -133,7 +133,7 @@ In 0.11.8. Watched working in a two-game run (marked *seen*): the Gold Skulltula
 
 ## Not yet checked in a game, or only partly
 
-- **Split shots, Poe and Gohma**: the Poe's fireball is now made in every game at that game's own Link (not yet checked in a game). Queen Gohma's spit is not split (its actor name is not known yet), so if she spits at one player, the others may not see it. [boss-multiplayer.md](boss-multiplayer.md)
+- **Split shots, Poe**: the Poe's fireball is now made in every game at that game's own Link (not yet checked in a game). Queen Gohma has no shot to split (her game files make only her eggs). [boss-multiplayer.md](boss-multiplayer.md)
 
 - **Race mode** (branch `race-mode`): a host setting in Co-op settings (the game's page and the Hookshot overlay), used at the next Host. On, players see each other, chat and talk, and each plays the world and their own save alone. Turned Off in the session, sharing comes back only with the next session. No start or finish signal yet.
 - **Gold Skulltulas, Shared or Not shared** (branch `token-share`): a host setting in Co-op settings (the game's page and the Hookshot overlay), used at the next Host. Shared, the default, also gives the token to a player whose Skulltula went without dying on their screen. Not shared is a race: each player has their own Skulltulas, tokens and count.
