@@ -49,6 +49,7 @@ inline constexpr std::uint64_t kActorState = 0x2c;     // u32: 3 made and kept, 
 inline constexpr std::uint64_t kActorPosition = 0x31c; // 3 x f32
 inline constexpr std::uint32_t kStateKept = 3;
 inline constexpr std::uint32_t kStateAwake = 4;
+inline constexpr std::uint32_t kStateSpent = 6;  // left there by the game after its own flight; free again (NEXT73)
 }  // namespace addr
 
 // The bosses whose shots go this way (Twinrova, as coop_boss_native.h HoldsOwnStarts).

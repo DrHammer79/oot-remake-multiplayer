@@ -3938,6 +3938,34 @@ TEST_CASE("boss shots: a bullet's actor freed with a room she was never listed i
     CHECK(o.GetCounts().owner_kept == 0);
 }
 
+TEST_CASE("boss shots: a bullet left in state 6 after its own flight is free for the owner's shot (NEXT73)") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    const std::uint64_t fire = PutBullet(g, t, 0x7000000, "Twinrova_Bullet_FireBullet");
+    const bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    t.Receive(kTwinrova, bs::BossShots{0, {}});
+    Frame(t, g, 1000);
+    // Its flight ended in our game: the game leaves it in state 6, not 3.
+    PutAt(g, fire + bs::addr::kActorState, bs::addr::kStateSpent);
+    const coop::protocol::Vec3 a{1.0f, 2.0f, 3.0f};
+    t.Receive(kTwinrova, bs::BossShots{1, {{1, "Twinrova_Bullet_FireBullet", a}}});
+    Frame(t, g, 2000);
+    CHECK(StateOf(g, fire) == bs::addr::kStateAwake);
+    CHECK(PlaceOf(g, fire) == a);
+    CHECK(t.GetCounts().fired == 1);
+    CHECK(t.GetCounts().dropped == 0);
+    // Another state (a field in 11: still in its own end) is not free.
+    const std::uint64_t field = PutBullet(g, t, 0x7100000, "Twinrova_Bullet_FireField");
+    Frame(t, g, 3000);
+    PutAt(g, field + bs::addr::kActorState, std::uint32_t{11});
+    t.Receive(kTwinrova, bs::BossShots{2, {{1, "Twinrova_Bullet_FireBullet", a}, {2, "Twinrova_Bullet_FireField", a}}});
+    Frame(t, g, 4000);
+    CHECK(StateOf(g, field) == 11);
+    CHECK(t.GetCounts().dropped == 1);
+}
+
 TEST_CASE("boss shots: a copy puts back its own wake before it wakes the owner's shot of the same frame") {
     bs::Table t;
     t.SetOn(true);
