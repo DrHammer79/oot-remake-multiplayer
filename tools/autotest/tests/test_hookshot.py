@@ -284,8 +284,8 @@ class ParseTest(unittest.TestCase):
         self.assertIn("stun", hs.MODULE_ONLY)
 
     def test_menu_step_goes_to_the_module(self):
-        steps = hs.parse("menu Customize\nmenu close\nmenu Host\n")
-        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host")])
+        steps = hs.parse("menu Customize\nmenu close\nmenu Host\nmenu Paste\n")
+        self.assertEqual([(s.kind, s.name) for s in steps], [("menu", "customize"), ("menu", "close"), ("menu", "host"), ("menu", "paste")])
         self.assertIn("menu", hs.MODULE_ONLY)
 
     def test_host_in_game_env(self):  # row 260: A hosts through its own Multiplayer > Host
