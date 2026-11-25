@@ -53,8 +53,7 @@ bool Write(const fs::path& p, const std::string& text) {
 
 // A list OffList wrote (by its comment line, older kits' too, which had no "default off" line).
 bool OursIn(const std::string& text) {
-    const auto nl = text.find('
-');
+    const auto nl = text.find('\n');
     return nl != std::string::npos && text.compare(nl + 1, kOursMark.size(), kOursMark) == 0;
 }
 
