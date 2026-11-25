@@ -1226,7 +1226,8 @@ TEST_CASE("object samples carry a battle manager's orders, component 23 (protoco
   CHECK(decode_bytes(raw) == Error::bad_value);
 }
 
-TEST_CASE("object samples carry the owner's boss action variations, component 24 (row 222 part 2, no bump)") {
+TEST_CASE("object samples carry the owner's boss action variations, component 24 (row 222 part 2, protocol 17)") {
+  CHECK(kProtocolVersion >= 17);  // 17: component 24 (0.11.12 is 16 and keeps only the components it knows)
   CHECK(static_cast<int>(ObjectComponent::variants) == 24);
   ObjectSample s{0, test::kPlacedId, 3, {}};
   s.state.time = {100, 1};

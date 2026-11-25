@@ -32,7 +32,7 @@ namespace coop::protocol {
 // 16: OBJECT_SAMPLE component 23, a battle manager's orders (BossOrders, row 222 Twinrova, 0.11.11): a protocol 15
 // server keeps only the components it knows in an object's last state (HANDOVER_STATE), and a 0.11.9 game's copies
 // would follow their own manager again, so mixed versions are refused at HELLO.
-inline constexpr std::uint16_t kProtocolVersion = 16;
+inline constexpr std::uint16_t kProtocolVersion = 17;
 // A public game (anyone joins without typing a password) lists itself on the relay's room list with this bit
 // on top of kProtocolVersion; the relay repeats the version as given. A listing without it is a private game
 // (or an older kit's): the joiner asks for the host's password and never tries the public one on it.
@@ -992,8 +992,8 @@ struct BossOrders {
   bool operator==(const BossOrders&) const = default;
 };
 
-// Component 24 (row 222 part 2, no protocol bump: older builds skip it by its length and keep their old
-// behaviour): the variation of the owner's boss actions. The game asks a move with an optional plug name and runs
+// Component 24 (row 222 part 2, protocol 17: an older reader skips it by its length, but a protocol 16 server keeps
+// only the components it knows in an object's last state, and a 0.11.12 copy runs its own variation): the variation of the owner's boss actions. The game asks a move with an optional plug name and runs
 // the command '<verb's name>:<plug name>' (no plug: the verb's plain command), main+0xbe070: Twinrova's ranged
 // attack is plain for Fire and 'Ice', '1FeintFire', ... for the others. The bsa component (20) carries no name, so a
 // copy named its own last plug and could run another variation. One entry per action change in bsa's recent (its
@@ -1036,7 +1036,7 @@ struct ObjectState {
   std::optional<ObjectHit> hit;                     // protocol 14: the owner's newest hit taken
   std::optional<ObjectStrike> strike;               // row 230: the owner's Link frozen by its scream
   std::optional<BossOrders> orders;                 // protocol 16: its battle manager's orders (row 222)
-  std::optional<BossVariants> variants;             // row 222 part 2: its owner's action variations (no bump)
+  std::optional<BossVariants> variants;             // row 222 part 2: its owner's action variations (protocol 17)
   bool operator==(const ObjectState&) const = default;
 };
 
@@ -1835,7 +1835,7 @@ struct BossAlive {
   bool operator==(const BossAlive&) const = default;
 };
 
-// EMOTE (branch ai-emotes, 615): one emote or ping of the sender's Link (/wave, /yes, /no, /look, /here), by its
+// EMOTE (protocol 17, branch ai-emotes, 615): one emote or ping of the sender's Link (/wave, /yes, /no, /look, /here), by its
 // number in the emote table (lichii/hook/coop_emote.h). A one-shot event, never kept: the others' games play the
 // emote's animation on the sender's puppet for a moment and start its sound there. The id is any 1 to
 // kMaxEmoteId; a game that does not know the id ignores it, so the table can grow with no version bump.
