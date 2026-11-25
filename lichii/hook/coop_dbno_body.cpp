@@ -94,6 +94,7 @@ void Crawl::Want(const Wanted& w) {
         standing_ = true;
         up_asks_ = 0;
         releases_left_ = kMaxReleases;
+        release_frames_ = kReleaseFrames;
     }
     if (w.lying || w.event || w.actor != posed_actor_) {
         standing_ = false;
@@ -304,10 +305,27 @@ std::optional<CoopPuppet::Call> Crawl::StepPose(CoopPuppet::Guest& guest, std::u
         return Play(guest, kHeldRate, main_base);
     }
     if (!want_.lying && releases_left_ > 0) {
-        if (want_.actor != posed_actor_ || !slot || slot->name != kLyingPose) {
-            releases_left_ = 0;  // the game plays its own now (or another Link)
-        } else if (held) {
+        // Getting up. The first play is on the up frame whatever slot 0 has
+        // (the game's own DamageS of the down, nearly every frame); then for
+        // kReleaseFrames frames the pose is played on again whenever slot 0
+        // holds it at rate 0 (the game's LDamageStandUp kept ours, skip-if-same).
+        // Another command there is no end of the watch: the game's own come
+        // and go before its stand-up starts.
+        const bool first = releases_left_ == kMaxReleases;
+        if (want_.actor != posed_actor_ || release_frames_ <= 0) {
+            if (want_.actor == posed_actor_ && held) {
+                Note("our Link up: '" + std::string(kLyingPose) + "' still held at rate 0 after " +
+                     std::to_string(kReleaseFrames) + " frames (" + std::to_string(kMaxReleases - releases_left_) +
+                     " played on)");
+            }
+            releases_left_ = 0;  // (another Link, or the watch is over)
+            release_frames_ = 0;
+            return std::nullopt;
+        }
+        --release_frames_;
+        if (first || held) {
             --releases_left_;
+            pose_seen_ = slot ? slot->name + (slot->rate == kHeldRate ? " held" : "") : std::string("?");
             return Play(guest, kPlayRate, main_base);
         }
     }
@@ -448,7 +466,8 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
             } else {
                 ++counts_.releases;
                 Note("our Link up: the game's AS '" + std::string(kLyingPose) +
-                     "' played on from the held pose (the game's stand-up from lying)");
+                     "' played on from the held pose (the game's stand-up from lying; slot 0 had '" + pose_seen_ +
+                     "')");
             }
             break;
         case Pending::crawl:

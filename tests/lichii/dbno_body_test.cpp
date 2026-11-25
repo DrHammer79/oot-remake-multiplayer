@@ -531,6 +531,50 @@ TEST_CASE("dbno body: getting up, a stand-up the game keeps held is played on ag
     CHECK_FALSE(c.Skip(kBsa, Req(verb::kWait, 2), false));  // the round is over: the game's own runs
 }
 
+TEST_CASE("dbno body (fullpass-1 bug 2): the game's DamageS on slot 0 at the up frame: the pose is still played on, and again when held") {
+    // While down the game plays its own DamageS on slot 0 nearly every frame
+    // before our caller (we hold the pose again each time). The up frame read
+    // DamageS, the release was dropped, and the game's LDamageStandUp then
+    // kept our held DamageLStand (skip-if-same) at rate 0: the Link lay until a hit.
+    Guest g;
+    MakeAs(g, "Wait", 1.0f);
+    Crawl c;
+    c.Want(Want(false, false, true, kActor));
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    c.Want(Want(true, false, true, kActor));
+    RunFrame(c, g, 984);
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    REQUIRE(Verbs(RunFrame(c, g, 1000)) == std::vector<std::int32_t>{verb::kCrawl});
+    for (std::uint64_t ms = 1100; ms < 1500; ms += 100) {
+        SetAs(g, "DamageS", 1.0f);  // the game's own, each frame
+        REQUIRE(Plays(RunFrame(c, g, ms)).size() == 1);
+    }
+    // Respawned (or revived): the up frame, the game's DamageS on slot 0 again.
+    c.Want(Want(false, false, true, kActor));
+    SetAs(g, "DamageS", 1.0f);
+    auto f = RunFrame(c, g, 2000);
+    REQUIRE(Plays(f).size() == 1);
+    CHECK(Plays(f)[0].as == "DamageLStand");
+    CHECK(Plays(f)[0].rate == 1.0f);  // the stand-up from lying, played on
+    CHECK(Verbs(f) == std::vector<std::int32_t>{verb::kLDamageStandUp});
+    // Another of the game's in between ends nothing; its stand-up kept the
+    // pose held (skip-if-same): played on again.
+    SetAs(g, "DamageS", 1.0f);
+    CHECK(Plays(RunFrame(c, g, 2016)).empty());
+    SetAs(g, "DamageLStand", 0.0f);
+    f = RunFrame(c, g, 2033);
+    REQUIRE(Plays(f).size() == 1);
+    CHECK(Plays(f)[0].rate == 1.0f);
+    CHECK(c.Totals().releases == 2);
+    // Up and moving: nothing more is played, and the watch ends.
+    SetAs(g, "Wait", 1.0f);
+    for (int i = 0; i < kReleaseFrames + 5; ++i) {
+        CHECK(Plays(RunFrame(c, g, 2050 + 16 * static_cast<std::uint64_t>(i))).empty());
+    }
+    SetAs(g, "DamageLStand", 0.0f);
+    CHECK(Plays(RunFrame(c, g, 9000)).empty());  // bounded: not played for ever
+}
+
 TEST_CASE("dbno body: a refused stand-up leaves the game's own Wait to stand the adult up") {
     Guest g;
     MakeAs(g, "Wait", 1.0f);
