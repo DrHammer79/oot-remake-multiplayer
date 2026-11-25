@@ -308,7 +308,7 @@ TEST_CASE("dbno body (row 190): the game's own requests on our slot are skipped 
     // The next frame: the scheduler's own Wait, before our caller: skipped. Another slot's request has its own
     // record: it runs.
     CHECK(d.Skip(kBsa, Req(verb::kWait), false));
-    CHECK(d.Skip(kBsa, Req(134), false));
+    CHECK(d.Skip(kBsa, Req(verb::kWalk), false));
     CHECK_FALSE(d.Skip(kBsa, Req(0, 1), false));
     CHECK(Verbs(RunFrame(d, g, 1016, 0)) == std::vector<std::int32_t>{verb::kCrawl});
     CHECK(Verbs(RunFrame(d, g, 1032, 0)).empty());  // taken
@@ -327,6 +327,28 @@ TEST_CASE("dbno body (row 190): the game's own requests on our slot are skipped 
     CHECK(taken_line);
     CHECK(d.Skip(kBsa, Req(134), false));     // crawling: skipped as before
     CHECK(d.Skip(kBsa, Req(0, 1), false));    // ... on every slot (a reaction may not stand our Link up)
+}
+
+TEST_CASE("dbno body (fullpass-1-2-2-2): the downing hit's own reaction runs on our slot, then the crawl") {
+    // Skipping the hit's reaction (134, DamageS) left its push in our Link: a downed child crawled on with no
+    // stick until a wall (NEXT56: 60 m; with the reaction run, still). Only the scheduler's own Walk / Wait
+    // are skipped for the crawl.
+    Guest g;
+    Crawl d;
+    d.Want(Want(false));
+    d.Skip(kBsa, Req(verb::kWait), false);
+    d.Want(Want(true));
+    RunFrame(d, g, 1000);
+    for (std::uint64_t ms = 1016; ms < 1200; ms += 16) {
+        CHECK_FALSE(d.Skip(kBsa, Req(134), false));        // the reaction: the game's
+        CHECK(Verbs(RunFrame(d, g, ms, 0)).empty());        // its slot this frame: nothing asked on top
+    }
+    CHECK(d.Totals().busy == 0);
+    // The reaction is over: the game's own Wait is skipped and the crawl is asked and taken.
+    CHECK(d.Skip(kBsa, Req(verb::kWait), false));
+    CHECK(Verbs(RunFrame(d, g, 1200, 0)) == std::vector<std::int32_t>{verb::kCrawl});
+    CHECK(Verbs(RunFrame(d, g, 1216, 0)).empty());
+    CHECK(d.Skip(kBsa, Req(134), false));  // crawling: a later reaction is skipped as before
 }
 
 TEST_CASE("dbno body (row 190): a 3 all the same is asked again the next frame, and is no refusal") {

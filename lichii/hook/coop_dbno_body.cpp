@@ -178,11 +178,14 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
             airborne_ = false;
             ground_seen_ = true;  // (Next starts a new round when one is due)
         }
-        if (our_slot && Trying()) {
+        if (our_slot && ground && Trying()) {
             // A crawl round is on: the game takes one request per slot a
-            // frame, so its own (asked before our caller runs) would take
-            // the slot and ours would get kSlotBusy. (Its requests on other
-            // slots have their own records: they run.)
+            // frame, so its own Walk / Wait (asked before our caller runs)
+            // would take the slot and ours would get kSlotBusy. (Its requests
+            // on other slots have their own records: they run.) Anything else
+            // runs: the downing hit's reaction (134, DamageS) skipped left its
+            // push in our Link, and a downed child crawled on with no stick
+            // until a wall (fullpass-1-2-2-2, NEXT56). The round goes on after it.
             ++counts_.cleared;
             if (!std::exchange(cleared_noted_, true)) {
                 Note("our downed Link: the game's own action verb " + std::to_string(a->verb) +
