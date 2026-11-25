@@ -154,15 +154,16 @@ std::vector<Outgoing> Sampler::frame(const std::optional<PlayerReading>& reading
     }
   }
   std::vector<Outgoing> out;
-  const std::uint8_t flags = status_bits(flags_, reading, title_up);
+  const bool title = note_title(reading, title_up);
+  const std::uint8_t flags = status_bits(flags_, reading, title);
   if (!status_sent_ || flags != flags_) {
     flags_ = flags;
     status_sent_ = true;
     push(out, protocol::PlayerStatus{protocol::kPlayerSelf, flags_});
   }
-  // The title screen keeps a readable Link, its own, not ours: sending it left our puppet frozen in the other games
-  // for as long as we stayed there (title-puppet). Its samples and equipment are no reading.
-  if (!reading || title_up) {
+  // The title and file-select screens still give a reading, not our Link in play: sending it left our puppet in the
+  // other games for as long as we stayed there (title-puppet). Its samples and equipment are no reading.
+  if (!reading || title) {
     previous_.reset();  // no velocity across a gap in the readings
     return out;
   }

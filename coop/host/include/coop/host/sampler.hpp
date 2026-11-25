@@ -107,13 +107,30 @@ class Sampler {
   // One emulated frame. `server_now_us` is coop::net::Client::server_now_us();
   // call only once the client is welcomed (it has a clock offset). The
   // status, if any, comes first in the result. No reading (no Link) sends no
-  // sample and no equipment, only the status `loading`; so does `title_up`,
-  // whose reading is the title screen's Link: the others fade us out.
+  // sample and no equipment, only the status `loading`; so does the whole
+  // title stay (note_title): the others fade us out.
   std::vector<Outgoing> frame(const std::optional<PlayerReading>& reading,
                               std::uint64_t server_now_us, bool title_up = false);
   std::vector<Outgoing> frame(PlayerReader& reader, std::uint64_t server_now_us) {
     return frame(reader.read(), server_now_us);
   }
+
+  // Whether we are on the title, from the first frame with its menu up
+  // (`title_up`) until a reading with a live Link actor comes with the menu
+  // down. The file-select screens take the menu down while the game still
+  // gives a pose, the GameUI's copy of our last one (PlayerReading::link_actor);
+  // New Game loads no save, so a load is not what ends it. frame() calls this;
+  // the session also does on frames that send nothing (not connected). reset()
+  // keeps it: a new connection does not move us off the title.
+  bool note_title(const std::optional<PlayerReading>& reading, bool title_up) {
+    if (title_up) {
+      on_title_ = true;
+    } else if (reading && reading->link_actor) {
+      on_title_ = false;
+    }
+    return on_title_;
+  }
+  bool on_title() const { return on_title_; }
 
   // After a reconnect: send the status and equipment again and start
   // velocity afresh. The sequence keeps counting.
@@ -166,6 +183,7 @@ class Sampler {
   std::uint32_t sequence_ = 0;
   std::uint8_t flags_ = 0;
   bool status_sent_ = false;
+  bool on_title_ = false;  // note_title
   std::optional<PlayerReading> previous_;   // last frame's reading
   std::uint64_t previous_time_us_ = 0;
   std::optional<protocol::PlayerSample> last_sent_;

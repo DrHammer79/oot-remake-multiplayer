@@ -57,6 +57,10 @@ struct PlayerReading {
   // The player actor's own Life component at 0 (read_life): Game Over. Down but not out keeps a downed Link at a
   // quarter heart, so not then. Nothing: not read (the last value sent is kept).
   std::optional<bool> dead;
+  // A live Link actor stands behind the reading. The position can come from the GameUI's copy of Link's pose, which
+  // stays valid after the game destroyed the actor (quit to title): the file-select screens then read a leftover pose
+  // at our last spot (Sampler::note_title).
+  bool link_actor = false;
   bool operator==(const PlayerReading&) const = default;
 };
 

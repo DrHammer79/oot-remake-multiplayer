@@ -25,6 +25,7 @@ PlayerReading at(float x, std::optional<bool> event = false) {
   r.age = proto::Age::adult;
   r.scene = "spot00";
   r.event_running = event;
+  r.link_actor = true;
   return r;
 }
 
@@ -417,6 +418,43 @@ TEST_CASE("host sampler: the title's menu up with a Link read sends no sample an
   CHECK(s.next_sequence() == sent);
   CHECK_FALSE(s.hold(kStart + 10'000'000));  // held on the title: nothing to send again
   CHECK(s.hold_reconnected(kStart + 11'000'000).empty());
+}
+
+TEST_CASE("host sampler: the whole title and file-select stay sends nothing, until a live Link is back (title-puppet)") {
+  // The overwrite prompt and the Load list take the title's menu down, and the game still gives a pose there: the
+  // GameUI's copy of our last one, with no Link actor behind it. Our puppet came back at our last spot.
+  Sampler s;
+  s.frame(at(1.0f), kStart);
+  PlayerReading leftover = at(1.0f);
+  leftover.link_actor = false;
+  std::uint64_t now = kStart;
+  std::vector<proto::PlayerStatus> statuses;
+  std::size_t samples = 0;
+  const auto stay = [&](const std::optional<PlayerReading>& r, bool menu_up) {
+    for (int i = 0; i < 90; ++i) {
+      const auto d = decode(s.frame(r, now += kFrameUs, menu_up));
+      samples += d.samples.size();
+      statuses.insert(statuses.end(), d.statuses.begin(), d.statuses.end());
+    }
+  };
+  stay(leftover, true);    // the title's menu
+  stay(leftover, false);   // New Game's overwrite prompt
+  stay(leftover, true);    // back to the menu
+  stay(leftover, false);   // Continue's Load list
+  stay(at(9.0f), true);    // the menu up over a live Link: still the title
+  stay(std::nullopt, false);  // the picked game loads
+  stay(leftover, false);
+  CHECK(samples == 0);
+  REQUIRE(statuses.size() == 1);
+  CHECK(statuses[0].flags == proto::status::loading);
+
+  const auto back = decode(s.frame(at(7.0f), now += kFrameUs));
+  REQUIRE(back.samples.size() == 1);
+  REQUIRE(back.statuses.size() == 1);
+  CHECK(back.statuses[0].flags == 0);
+  // In play again, a reading with no actor behind it is taken as before (only the title stay asks for one).
+  leftover.position = {30.0f, 0.0f, 0.0f};
+  CHECK(decode(s.frame(leftover, now += kFrameUs)).samples.size() == 1);
 }
 
 TEST_CASE("host sampler: back from the title, the others see the player again (title-puppet)") {

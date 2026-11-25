@@ -119,6 +119,11 @@ class Session {
   // (FlagWatcher::set_title; passed on also while not connected). Never set
   // on the emulator.
   void set_title_up(bool up) { title_up_ = up; }
+  // Any thread, after frame(): we are on the title or its file-select screens (Sampler::note_title).
+  bool on_title() {
+    std::lock_guard lock(sampler_mutex_);
+    return sampler_.on_title();
+  }
   // Emulator thread, before frame(): Hookshot's save-load wraps (patch 0024; FlagWatcher::set_native_loads,
   // note_save_load_start, note_save_loaded). Passed on also while not connected: a load then is taken at the
   // connection's first frame. Never set on the emulator.

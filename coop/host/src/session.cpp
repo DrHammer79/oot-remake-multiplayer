@@ -67,7 +67,13 @@ FrameReport Session::frame(const std::optional<PlayerReading>& reading, FlagStor
 
   // Every frame, connected or not: a title while not connected matters at the
   // next connection (FlagWatcher::set_title, player report #96).
-  if (watcher_) watcher_->set_title(title_up_);
+  // The whole title stay, menu up or not (Sampler::note_title).
+  bool title = false;
+  {
+    std::lock_guard lock(sampler_mutex_);
+    title = sampler_.note_title(reading, title_up_);
+  }
+  if (watcher_) watcher_->set_title(title);
 
   std::vector<Outbound> out;
   if (report.connected) {
@@ -87,10 +93,10 @@ FrameReport Session::frame(const std::optional<PlayerReading>& reading, FlagStor
       }
     }
     if (watcher_ && flags != nullptr && !race_) {
-      // No Link to read: the game is loading (FlagWatcher::set_loading). Hookshot's title menu up is never play
+      // No Link to read: the game is loading (FlagWatcher::set_loading). Hookshot's title stay is never play
       // either, Link or not (forest-temple-a: a host's save load through it was not seen as one, and the old
       // save's floors were put back into the new save, once a frame).
-      watcher_->set_loading(!reading.has_value() || title_up_);
+      watcher_->set_loading(!reading.has_value() || title);
       watcher_->set_scene(scene_readable_);
       queue_flags(watcher_->frame(*flags), out);
     }
