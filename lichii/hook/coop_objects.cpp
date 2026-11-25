@@ -107,6 +107,7 @@
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 #include "coop_objects_sync.h"
+#include "coop_test_life_hold.h"
 #include "coop_follow.h"
 #include "coop_frame_clock.h"
 #include "coop_link_sound.h"
@@ -4555,6 +4556,28 @@ private:
                         LOG_INFO(Core,
                                  "coop: objects: our Link's life {} of {}, MaxLife flag {} (quarter hearts)",
                                  life, max, flag);
+                    }
+                    // Test only (coop_test_life_hold.h): Link's life held full for a lane run in an enemy room.
+                    static const std::optional<std::int32_t> life_hold = [] {
+                        const auto h = CoopTestLifeHold::Parse(EnvText("LICHII_COOP_TEST_LIFE_HOLD"));
+                        if (h) {
+                            LOG_INFO(Core, "coop: test life hold on: our Link's life held at {} (LICHII_COOP_TEST_LIFE_HOLD)",
+                                     *h > 0 ? std::to_string(*h) : std::string("his max"));
+                        }
+                        return h;
+                    }();
+                    if (life_hold && memory_ != nullptr && memory_->IsValidVirtualAddressRange(value->first + 8, 4) &&
+                        memory_->IsValidVirtualAddressRange(value->second + 8, 4)) {
+                        const auto w = CoopTestLifeHold::Step(*life_hold, life, max);
+                        if (w.max) {
+                            memory_->Write32(value->second + 8, static_cast<u32>(*w.max));
+                        }
+                        if (w.life) {
+                            memory_->Write32(value->first + 8, static_cast<u32>(*w.life));
+                        }
+                        if (w.max || (w.life && *w.life - life >= 4)) {
+                            CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
+                        }
                     }
                     if (known.first == "Player_Child" || known.first == "Player_Adult") {
                         GivePvp(r, a, value->first + 8, life);  // PvP (coop_pvp_game.cpp)
