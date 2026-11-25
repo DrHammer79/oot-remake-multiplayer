@@ -709,7 +709,11 @@ constexpr std::uint64_t kAutoSaveKindEvent = 5;        // EventTriggerRequestAut
 constexpr std::uint64_t kAutoSaveMgrState = 0x130;     // mgr: -> the state the request marks (0 before it is made)
 
 void RequestHostAutoSave(void* ctx) {
-    if (!CoopSave::TakeSaveRequest()) return;
+    const auto request = CoopSave::TakeSaveRequest();
+    if (request == CoopSave::SaveRequest::none) return;
+    // (the test commands' `autosave`, rejoin-host-273-2: the same call; no guest waits for it)
+    const bool test = request == CoopSave::SaveRequest::test;
+    const char* const without = test ? "the test's autosave is not asked" : "the guests get our last save on disk";
     const std::uint64_t base = CoopRuntime::MainBase();
     const auto read64 = [](std::uint64_t at) {
         std::uint64_t v = 0;
@@ -718,7 +722,7 @@ void RequestHostAutoSave(void* ctx) {
     const std::uint64_t got = read64(base + kGameSystemGot);
     const std::uint64_t system = got != 0 ? read64(got) : 0;
     if (system == 0) {
-        LOG_WARNING(Core, "coop: save: our game has no game system yet: the guests get our last save on disk");
+        LOG_WARNING(Core, "coop: save: our game has no game system yet: {}", without);
         return;
     }
     HosCoopCall k{};
@@ -727,7 +731,7 @@ void RequestHostAutoSave(void* ctx) {
     k.x[1] = kAutoSaveMgrIndex;
     std::uint64_t mgr = 0;
     if (!g_api->call(ctx, &k, &mgr) || mgr == 0 || read64(mgr + kAutoSaveMgrState) == 0) {
-        LOG_WARNING(Core, "coop: save: our game's autosave manager is not there: the guests get our last save on disk");
+        LOG_WARNING(Core, "coop: save: our game's autosave manager is not there: {}", without);
         return;
     }
     k = HosCoopCall{};
@@ -737,7 +741,12 @@ void RequestHostAutoSave(void* ctx) {
     k.x[2] = 0;
     std::uint64_t x0 = 0;
     if (!g_api->call(ctx, &k, &x0)) {
-        LOG_WARNING(Core, "coop: no game function at {:#x}: the guests get our last save on disk", k.function);
+        LOG_WARNING(Core, "coop: no game function at {:#x}: {}", k.function, without);
+        return;
+    }
+    if (test) {
+        LOG_INFO(Core, "coop: save: asked our game for its own autosave (an event's end request), for the test "
+                       "commands' autosave: the game's own gate may refuse it");
         return;
     }
     LOG_INFO(Core, "coop: save: asked our game for its own autosave (an event's end request): the guests' send waits "
@@ -1646,8 +1655,21 @@ bool Start(const HosCoopApi* api) {
     }
     // Original game (coop_original.h): the module stays off, all of it, and Longshot's F1 menu gets one tab with the
     // switch alone, so the player can turn it back.
-    if (const auto options = CoopTitle::KitOptionsFile();
-        options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions())) {
+    // The mods list in step with the switch first (CoopOriginal::Sync: a list an older kit wrote, the switch set or
+    // taken out by hand in coop-options.ini; report 266), for the next start: Longshot read the list before the module.
+    const auto options = CoopTitle::KitOptionsFile();
+    const bool original = options && CoopOriginal::OnIn(CoopTitle::ReadKitOptions());
+    if (options) {
+        bool changed = false;
+        std::string why;
+        if (!CoopOriginal::Sync(CoopRuntime::GameDir() / "mods", original, changed, why)) {
+            LOG_WARNING(Core, "coop: original game: the mods list is not in step with the switch: {}", why);
+        } else if (changed) {
+            LOG_INFO(Core, "coop: original game {}: the mods list put in step with it (from the next start)",
+                     original ? "on" : "off");
+        }
+    }
+    if (original) {
         g_original.Open(*options, CoopRuntime::GameDir() / "mods");
         g_original_on = true;
         LOG_INFO(Core, "coop: original game ({}): the module stays off; F1's \"Original game\" tab turns it back",
@@ -1780,6 +1802,12 @@ void Frame(void* ctx, int site) {
         CoopPlaytest::AtFrame();
     }
     CoopWindowBrand::Tick(CoopRuntime::GameDir());  // the window's title and icon, co-op on or idle (solo too)
+    if (site == HOS_COOP_SITE_FRAME) {  // row 271: this game's memory once a minute, solo too (coop_host_menu.h)
+        static std::uint64_t next_memory_ms = 0;
+        if (CoopHostMenu::MemoryLineDue(SteadyMs(), next_memory_ms)) {
+            LOG_INFO(Core, "coop: memory: {}", CoopHostMenu::ProcessMemoryText());
+        }
+    }
     if (!g_on) {
         return;
     }
@@ -2574,7 +2602,11 @@ void DressCharacters(void* ctx) {
         const auto part = CoopLook::PartOf(number);
         return part ? shown[*part] : std::nullopt;
     });
-    if (own.eyes || own.hair || character != 0) {
+    // (and Link once he has worn a colour: back to none, the wardrobe puts the game's own back. Without him as a
+    // target it never saw the change, and Game's own colour left the last colour on him)
+    static bool own_worn = false;
+    own_worn = own_worn || own.eyes || own.hair;
+    if (own_worn || character != 0) {
         // (the model key: the actor name and the character shown, ModelKey, so another pick or age is looked up anew;
         // `picture`: dressed only on the Customize screen, its rows are the page's)
         const auto dress = [&](std::uint64_t actor, std::size_t i, std::uint64_t model) {
@@ -2869,6 +2901,14 @@ COOP_HOOKSHOT_EXPORT int hos_coop_mouse(float fx, float fy, int event) {
     static CoopBoundary::Site site{"hos_coop_mouse"};
     return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
         return CoopHookshot::Mouse(fx, fy, event) ? 1 : 0;
+    });
+}
+// The game's menu mouse held off while co-op presses the menu's buttons for the player (coop_auto_press.h; Longshot
+// patch 0030's oot_menu.c asks each menu frame): 1 = held, the mouse neither points nor clicks.
+COOP_HOOKSHOT_EXPORT int hos_coop_menu_mouse_held(void) noexcept {
+    static CoopBoundary::Site site{"hos_coop_menu_mouse_held"};
+    return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
+        return g_on && CoopTitle::MenuMouseHeld() ? 1 : 0;
     });
 }
 // Drawing over the picture (hos_coop_draw.h), on Hookshot's render thread.

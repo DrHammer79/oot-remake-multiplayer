@@ -899,7 +899,7 @@ actor manager (main+0x14acc).
 
 - Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST).
 - The owner's game reads its bullets every frame. A wake (3 to 4) is one shot. The bullets awake now, each with its
-  seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 25 `shots`, no protocol bump); an empty
+  seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 29 `shots`, no protocol bump); an empty
   list is sent for 500 ms after the last one ends.
 - A copy wakes a kept bullet of the same name for each new owner shot: the same 3 to 4 write, with the owner's place.
   Every frame after that it puts the bullet on the owner's newest place, so it moves where the owner's does, and its
@@ -913,7 +913,7 @@ actor manager (main+0x14acc).
 The log says `shots: the owner's came` per copy and a summary line every 10 s (`ours sent`, `owner's fired`, `own
 stopped`, `dropped`). `LICHII_COOP_BOSS_SHOTS=0` turns it off. Not yet known: whether a bullet woken by our write
 (not the manager's) flies and hits as the game's own does; if not, the copy only shows it. Tests: boss_native_test
-("boss shots"), codec_test (component 25).
+("boss shots"), codec_test (component 29).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 

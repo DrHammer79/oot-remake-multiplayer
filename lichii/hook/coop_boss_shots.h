@@ -12,7 +12,7 @@
 // of the shoot code in the fight (NEXT65, NEXT66). So:
 // - Every game keeps the handles of its Twinrova bullets as they are made (CREATE_REQUEST, KeepBullet).
 // - The owner's game counts each wake of one of them as a shot and sends the bullets awake now, with their places,
-//   in the boss's samples (OBJECT_SAMPLE component 25, coop::protocol::BossShots).
+//   in the boss's samples (OBJECT_SAMPLE component 29, coop::protocol::BossShots).
 // - A copy game wakes a kept bullet of the same name for each owner shot, as the game's own wake does (state 3 to 4,
 //   a write), and puts it on the owner's place every frame, so it moves where the owner's does and still hits our own
 //   Link. When the owner's ends, ours is put back to 3. Once the owner's first sample has come, a wake by our own AI
