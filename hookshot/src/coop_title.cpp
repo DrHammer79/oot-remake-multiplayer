@@ -23,6 +23,8 @@
 #include "coop_auto_press.h"
 #include "coop_hook.h"
 #include "coop_i18n.h"
+#include "coop_lobby.h"
+#include "coop_lobby_game.h"
 #include "coop_pack_notice.h"
 #include "coop_mod_screens.h"
 #include "coop_mods_runtime.h"
@@ -1189,10 +1191,20 @@ void StepMenu(void* ctx, std::uint64_t screen) {
                                 ? CoopTitleMenu::MenuHint(look.rows[static_cast<std::size_t>(f)].action)
                                 : nullptr;
         if (words == nullptr && !sub && CoopPackNotice::DirectOn()) words = CoopPackNotice::kDirectHint;   // (player report 225: solo has no chat box)
+        std::string host_line;   // (in a session: who hosts, so the player knows whose save Continue loads)
+        if (words == nullptr && !sub && wait_line.empty()) {
+            const CoopLobby::Seen seen = CoopLobby::Now();
+            std::string host_name;
+            for (const auto& p : seen.players) {
+                if (p.host) host_name = p.name;
+            }
+            host_line = CoopLobby::TitleHostLine(seen.connected && seen.host != 0, seen.host == seen.self, host_name);
+        }
         // (the host's save on its way after a Join here comes first: "Loading Saria's save...", the name is data)
         const std::string said = !wait_line.empty() ? CoopI18n::Tr(wait_line)
                                  : words != nullptr  ? CoopI18n::Tr(words)
-                                                     : std::string();
+                                 : !host_line.empty() ? host_line
+                                                      : std::string();
         const bool hint = !said.empty() && layout != 0 && g_column.hint != 0 && SetLiveText(ctx, layout, kHintSlot, said);
         g_wait_on_hint.store(hint && !wait_line.empty());
         ShowColumn(ctx, screen, CoopTitleNative::kButtons, hint, {});

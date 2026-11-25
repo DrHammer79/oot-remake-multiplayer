@@ -1302,7 +1302,9 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             bool played = send.fresh;   // (a save written after the ask: the newest slot is the game now)
             const auto slot_dir = send.no_save ? std::nullopt
                                   : send.fresh ? save::newest_slot(g_dir)
-                                               : save::slot_to_send(g_dir, g_played.slot(), &played);
+                                               : save::slot_to_send(g_dir, g_played.slot() || g_in_game ? g_played.slot()
+                                                                                             : g_played.last(),
+                                                                     &played);
             const auto slot = slot_dir ? save::read_slot(*slot_dir) : std::nullopt;
             if (slot && !played) {
                 // Row 63: the slot played is not known (the title): the guests' race is the playthrough of the slot
