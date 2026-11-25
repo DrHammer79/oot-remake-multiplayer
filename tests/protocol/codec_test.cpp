@@ -3119,3 +3119,103 @@ TEST_CASE("pvp on real bodies: types 540 to 542, round-trip and refuse bad value
   CHECK_FALSE(set_sender(answered, 1));
   CHECK(set_sender(answered, 2));
 }
+
+TEST_CASE("object components 26-28 carry keyed values (protocol 18, sync plan S1)") {
+  CHECK(kProtocolVersion == 18);  // one bump for the whole sync plan: 26-28 kept by the server
+  CHECK(static_cast<int>(ObjectComponent::plugs) == 26);
+  CHECK(static_cast<int>(ObjectComponent::clocks) == 27);
+  CHECK(static_cast<int>(ObjectComponent::events) == 28);
+  ObjectSample s{0, test::kPlacedId, 3, {}};
+  s.state.time = {100, 1};
+  s.state.plugs = KeyedValues{true, {{7, 1, std::int32_t{1}}, {7, 2, std::int32_t{-5}}, {9, 1, 2.5f}}};
+  s.state.clocks = KeyedValues{false, {{3, 0xc0, Vec3{1, 2, 3}}, {3, 0xc4, KeyedRemove{}}}};
+  s.state.events = KeyedValues{true, {{0x1234567890abcdefull, 0xffffffffu, std::uint64_t{123456789012}}}};
+  const Bytes bytes = must_encode(s);
+  Message back;
+  REQUIRE(decode(bytes, back) == Error::none);
+  CHECK(std::get<ObjectSample>(back) == s);
+  // An older build skips each by its length: the same sample with the ids turned into ones it does not know.
+  ObjectSample older = s;
+  older.state.plugs.reset();
+  older.state.clocks.reset();
+  older.state.events.reset();
+  Bytes probe = bytes;
+  int patched = 0;
+  // The time component comes first (4 + 12 bytes after the message header); walk the component headers.
+  const Bytes header = must_encode(ObjectSample{0, test::kPlacedId, 3, {{100, 1}}});
+  for (std::size_t at = header.size(); at + 4 <= probe.size();) {
+    const std::uint16_t id = static_cast<std::uint16_t>(probe[at] | (probe[at + 1] << 8));
+    const std::uint16_t length = static_cast<std::uint16_t>(probe[at + 2] | (probe[at + 3] << 8));
+    if (id >= 26 && id <= 28) {
+      probe[at] = static_cast<std::uint8_t>(id + 4);  // 30-32: ids no build knows
+      ++patched;
+    }
+    at += 4 + length;
+  }
+  CHECK(patched == 3);
+  REQUIRE(decode(probe, back) == Error::none);
+  CHECK(std::get<ObjectSample>(back) == older);
+  // Refused: keys not rising or twice, a remove in a full list, a float not finite, more than kMaxKeyedValues.
+  Bytes out;
+  ObjectSample bad = s;
+  bad.state.clocks.reset();
+  bad.state.events.reset();
+  bad.state.plugs = KeyedValues{false, {{7, 2, std::int32_t{1}}, {7, 1, std::int32_t{1}}}};
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs = KeyedValues{false, {{7, 1, std::int32_t{1}}, {7, 1, std::int32_t{2}}}};
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs = KeyedValues{true, {{7, 1, KeyedRemove{}}}};
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs = KeyedValues{false, {{7, 1, std::numeric_limits<float>::infinity()}}};
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs = KeyedValues{false, {{7, 1, Vec3{0, std::numeric_limits<float>::quiet_NaN(), 0}}}};
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs = KeyedValues{false, {}};
+  for (std::uint32_t i = 0; i <= kMaxKeyedValues; ++i) bad.state.plugs->values.push_back({1, i, std::int32_t{0}});
+  CHECK(encode(bad, out) == Error::bad_value);
+  bad.state.plugs->values.pop_back();
+  CHECK(encode(bad, out) == Error::none);  // kMaxKeyedValues fit
+  // The decoder refuses an unknown value type and a mode other than 0 or 1.
+  bad.state.plugs = KeyedValues{false, {{7, 1, std::int32_t{1}}}};
+  Bytes raw = must_encode(bad);
+  raw[raw.size() - 5] = 5;  // the type byte before the s32
+  CHECK(decode_bytes(raw) == Error::bad_value);
+  raw = must_encode(bad);
+  raw[raw.size() - 1 - 4 - 1 - 4 - 8 - 2] = 2;  // the mode byte
+  CHECK(decode_bytes(raw) == Error::bad_value);
+}
+
+TEST_CASE("keyed values merge: a full list replaces, a delta changes the keys it names (protocol 18)") {
+  std::size_t dropped = 0;
+  const KeyedValues kept{true, {{1, 1, std::int32_t{1}}, {1, 2, std::int32_t{2}}, {2, 1, 1.5f}}};
+  // A delta: one changed, one removed, one added (in key order), the rest kept.
+  KeyedValues merged = MergeKeyed(&kept, KeyedValues{false, {{1, 1, std::int32_t{9}}, {1, 2, KeyedRemove{}},
+                                                              {1, 5, std::uint64_t{77}}}},
+                                  dropped);
+  CHECK(merged == KeyedValues{true, {{1, 1, std::int32_t{9}}, {1, 5, std::uint64_t{77}}, {2, 1, 1.5f}}});
+  // A full list replaces all; a remove of a key not kept changes nothing.
+  merged = MergeKeyed(&kept, KeyedValues{true, {{3, 3, std::int32_t{3}}}}, dropped);
+  CHECK(merged == KeyedValues{true, {{3, 3, std::int32_t{3}}}});
+  merged = MergeKeyed(nullptr, KeyedValues{false, {{4, 4, KeyedRemove{}}, {5, 5, std::int32_t{5}}}}, dropped);
+  CHECK(merged == KeyedValues{true, {{5, 5, std::int32_t{5}}}});
+  CHECK(dropped == 0);
+  // Past kMaxKeyedValues new keys are left out and counted; changes to kept keys still go in.
+  KeyedValues full{true, {}};
+  for (std::uint32_t i = 0; i < kMaxKeyedValues; ++i) full.values.push_back({1, i, std::int32_t{0}});
+  merged = MergeKeyed(&full, KeyedValues{false, {{1, 0, std::int32_t{8}}, {2, 0, std::int32_t{1}}}}, dropped);
+  CHECK(merged.values.size() == kMaxKeyedValues);
+  CHECK(merged.values.front().value == KeyedData{std::int32_t{8}});
+  CHECK(dropped == 1);
+  // KeepKeyed: a list the new state lacks stays as kept; one it has is merged; others are left alone.
+  ObjectState old;
+  old.plugs = kept;
+  old.events = KeyedValues{true, {{9, 9, std::uint64_t{1}}}};
+  ObjectState next;
+  next.plugs = KeyedValues{false, {{2, 1, KeyedRemove{}}}};
+  next.position = Vec3{1, 2, 3};
+  CHECK(KeepKeyed(&old, next) == 0);
+  CHECK(next.plugs == KeyedValues{true, {{1, 1, std::int32_t{1}}, {1, 2, std::int32_t{2}}}});
+  CHECK(next.events == old.events);
+  CHECK_FALSE(next.clocks);
+  CHECK(next.position == Vec3{1, 2, 3});
+}
