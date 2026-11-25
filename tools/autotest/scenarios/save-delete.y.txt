@@ -1,0 +1,3 @@
+# save-delete: B on the load list presses Y (the list hint is only "Back"; Y is the guess for the delete action).
+press Y
+wait 120
