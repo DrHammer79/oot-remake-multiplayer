@@ -160,7 +160,9 @@ std::vector<Outgoing> Sampler::frame(const std::optional<PlayerReading>& reading
     status_sent_ = true;
     push(out, protocol::PlayerStatus{protocol::kPlayerSelf, flags_});
   }
-  if (!reading) {
+  // The title screen keeps a readable Link, its own, not ours: sending it left our puppet frozen in the other games
+  // for as long as we stayed there (title-puppet). Its samples and equipment are no reading.
+  if (!reading || title_up) {
     previous_.reset();  // no velocity across a gap in the readings
     return out;
   }

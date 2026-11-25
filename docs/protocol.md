@@ -252,7 +252,7 @@ Protocol 10 also keeps 360 to 364 for `cutscene-snap` (issue 194); none is used 
 
 The `time` component is required in every sample; the others are sent only when the sender has them.
 
-A player sends `PLAYER_SAMPLE` every frame it moves (up to 60 a second: samples are at least 14 ms apart, so high refresh (Ctrl+U, up to 165 presents a second) sends no more; a scene or age change goes at once) and at least 4 a second while still. Receivers keep the last 16 samples per player, show them behind by a delay from how old their samples come (at least 100 ms; docs/presence.md, "Each player's own delay"), interpolate between samples and extrapolate up to 150 ms from the last one; beyond that the puppet holds and fades.
+A player sends `PLAYER_SAMPLE` every frame it moves (up to 60 a second: samples are at least 14 ms apart, so high refresh (Ctrl+U, up to 165 presents a second) sends no more; a scene or age change goes at once) and at least 4 a second while still. None is sent while there is no Link to read, or while the title's menu is up (the title screen keeps a readable Link, which is not the player's); `PLAYER_STATUS` says `loading` then, and no equipment is sent. Receivers keep the last 16 samples per player, show them behind by a delay from how old their samples come (at least 100 ms; docs/presence.md, "Each player's own delay"), interpolate between samples and extrapolate up to 150 ms from the last one; beyond that the puppet holds and fades.
 
 The player field of `JOIN_PARTNER`, `FLAG_SET` and `FLAG_STATE` works as in `CHAT`: 0 from a client, the sender's number from the server.
 

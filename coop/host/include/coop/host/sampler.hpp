@@ -107,7 +107,8 @@ class Sampler {
   // One emulated frame. `server_now_us` is coop::net::Client::server_now_us();
   // call only once the client is welcomed (it has a clock offset). The
   // status, if any, comes first in the result. No reading (no Link) sends no
-  // sample, only the status `loading`; so does `title_up` (status_bits).
+  // sample and no equipment, only the status `loading`; so does `title_up`,
+  // whose reading is the title screen's Link: the others fade us out.
   std::vector<Outgoing> frame(const std::optional<PlayerReading>& reading,
                               std::uint64_t server_now_us, bool title_up = false);
   std::vector<Outgoing> frame(PlayerReader& reader, std::uint64_t server_now_us) {

@@ -1207,8 +1207,8 @@ public:
                           reading ? std::optional(reading->position) : std::nullopt);
         }
         if (memory) {  // split screen: each extra local player is a player of the session (coop_local_net.h)
-            CoopLocalNet::Online(
-                *memory, reading, report.connected, report.server_now_us,
+            CoopLocalNet::Online(  // the title's Link is no reading for the seats either (title-puppet)
+                *memory, CoopSave::TitleUp() ? std::nullopt : reading, report.connected, report.server_now_us,
                 [this](const coop::protocol::Message& m) {
                     return session_->with_client([&m](coop::net::Client& client) { return client.send(m); });
                 },

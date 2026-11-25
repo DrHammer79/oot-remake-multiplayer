@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "coop/host/sampler.hpp"
+#include "coop/presence/presence.hpp"
 #include "coop/protocol/codec.hpp"
 #include "fake_memory.hpp"
 
@@ -388,6 +389,68 @@ TEST_CASE("host sampler: no reading, no sample, the status loading") {
   CHECK(d.statuses[0].flags == proto::status::loading);
   CHECK(s.next_sequence() == 0);
   CHECK(s.frame(std::nullopt, kStart + kFrameUs).empty());  // no change, nothing
+}
+
+TEST_CASE("host sampler: the title's menu up with a Link read sends no sample and no equipment (title-puppet)") {
+  // The game keeps a readable Link on its title screen: sending it left the player's puppet frozen in the other
+  // games for as long as they stayed there.
+  Sampler s;
+  PlayerReading r = at(1.0f);
+  r.equipment = proto::Equipment{};
+  r.equipment->color = 0x112233u;
+  for (int i = 0; i < 3; ++i) s.frame(r, kStart + i * kFrameUs);
+  const std::uint32_t sent = s.next_sequence();
+
+  PlayerReading title = at(40.0f);  // the title's own Link, moving, in other gear
+  title.equipment = proto::Equipment{};
+  title.equipment->color = 0x445566u;
+  std::vector<proto::PlayerStatus> statuses;
+  for (int i = 3; i < 200; ++i) {
+    title.position[0] += 0.1f;
+    const auto d = decode(s.frame(title, kStart + i * kFrameUs, true));
+    CHECK(d.samples.empty());
+    CHECK(d.equips.empty());
+    statuses.insert(statuses.end(), d.statuses.begin(), d.statuses.end());
+  }
+  REQUIRE(statuses.size() == 1);
+  CHECK(statuses[0].flags == proto::status::loading);
+  CHECK(s.next_sequence() == sent);
+  CHECK_FALSE(s.hold(kStart + 10'000'000));  // held on the title: nothing to send again
+  CHECK(s.hold_reconnected(kStart + 11'000'000).empty());
+}
+
+TEST_CASE("host sampler: back from the title, the others see the player again (title-puppet)") {
+  Sampler s;
+  coop::presence::Presence others;
+  proto::PlayerJoined joined;
+  joined.player_number = 2;
+  others.on_joined(joined);
+  std::uint64_t now = kStart;
+  // `frames` frames of this player, relayed to the others; the fade of the pose they draw then (0: gone).
+  const auto play = [&](const PlayerReading& r, bool title_up, int frames) {
+    for (int i = 0; i < frames; ++i) {
+      now += kFrameUs;
+      for (auto& sample : decode(s.frame(r, now, title_up)).samples) {
+        sample.player_number = 2;
+        others.on_sample(sample);
+      }
+    }
+    const auto pose = others.shown(2, now);
+    return pose ? pose->fade : 0.0f;
+  };
+  CHECK(play(at(1.0f), false, 60) == 1.0f);
+  CHECK(play(at(40.0f), true, 180) == 0.0f);  // 3 s on the title: faded out
+
+  const auto back = decode(s.frame(at(7.0f), now += kFrameUs));
+  REQUIRE(back.samples.size() == 1);  // at once, no wait for the keep-alive
+  CHECK_FALSE(back.samples[0].velocity);  // no velocity across the title
+  REQUIRE(back.statuses.size() == 1);
+  CHECK(back.statuses[0].flags == 0);
+  auto relayed = back.samples[0];
+  relayed.player_number = 2;
+  CHECK(others.on_sample(relayed) == coop::presence::SampleResult::buffered);
+  CHECK(play(at(7.0f), false, 60) == 1.0f);
+  CHECK(others.shown(2, now)->position[0] == doctest::Approx(7.0f));
 }
 
 TEST_CASE("host sampler: status_bits, every away bit (issue 150, away-status)") {
