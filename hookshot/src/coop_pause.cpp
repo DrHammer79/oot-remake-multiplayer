@@ -359,12 +359,20 @@ std::string g_name_suffix;
 int g_name_tries = 0;
 bool g_name_retry = false;   // (the Join now is that one: its suffix kept)
 
-// The code a host gives its friends: its room on the relay ("<room>@<relay>"), else the relay's join code
-// ("<CODE>@<relay>"), else the invite code; "" none yet. Join takes each of them.
+// The code a host gives its friends: its room on the relay ("<room>@<relay> <password>"), else the relay's join code
+// ("<CODE>@<relay> <password>"), else the invite code (which holds the password); "" none yet. Join takes each of
+// them. The relay lines carry the join password (RelayShareLine): a pasted line without it never joined.
 constexpr std::uint64_t kRelayWaitMs = 6000;
 std::string ShareCode(const HosCoopStatus& st) {
-    if (st.relay_room[0] != 0) return std::string(st.relay_room, strnlen(st.relay_room, sizeof st.relay_room));
-    if (st.relay_code[0] != 0) return std::string(st.relay_code, strnlen(st.relay_code, sizeof st.relay_code));
+    const std::string password(st.password, strnlen(st.password, sizeof st.password));
+    if (st.relay_room[0] != 0) {
+        return CoopTitleMenu::RelayShareLine(std::string_view(st.relay_room, strnlen(st.relay_room, sizeof st.relay_room)),
+                                             password);
+    }
+    if (st.relay_code[0] != 0) {
+        return CoopTitleMenu::RelayShareLine(std::string_view(st.relay_code, strnlen(st.relay_code, sizeof st.relay_code)),
+                                             password);
+    }
     return std::string(st.invite, strnlen(st.invite, sizeof st.invite));
 }
 
@@ -1788,6 +1796,14 @@ void JoinPasteNow() {
             SayOnPage(kSayRefused);
             return;
         }
+        if (CoopTitleMenu::RelayLineWithoutPassword(line)) {
+            // (an older host's room line: the room, not its password; Join alone would only say "type the password")
+            LOG_INFO(Core, "coop: multiplayer tab: join: the pasted relay line has no join password after it");
+            g_menu.SetNote({"That room line has no password after it. Ask the host for the join password, then "
+                            "type the room and the password in Join a game."});
+            SayOnPage(kSayRefused);
+            return;
+        }
         if (!Join(line)) SayOnPage(kSayRefused);
     });
 }
@@ -1958,7 +1974,7 @@ void PageCopyNow(PageCopy what) {
     switch (what) {
     case PageCopy::kCode:
         // (a relay room's name first: friends type it; then the relay's join code, then the invite code)
-        text = st.relay_room[0] != 0 ? st.relay_room : st.relay_code[0] != 0 ? st.relay_code : st.invite;
+        text = ShareCode(st);   // (a relay line with the join password after it: a friend's paste joins at once)
         words = st.relay_room[0] != 0 ? "room name" : st.relay_code[0] != 0 ? "join code" : "invite code";
         break;
     case PageCopy::kAnswer:
