@@ -72,6 +72,7 @@ struct Counts {
     std::uint64_t fired = 0;         // owner's shots a copy woke
     std::uint64_t dropped = 0;       // owner's shots not woken (no kept bullet of the name free, or missed)
     std::uint64_t restarts = 0;      // a copy started again (a new owner)
+    std::uint64_t missed = 0;        // bullets whose slot was taken or used again before their actor was read
 };
 
 class Table {
@@ -79,6 +80,7 @@ public:
     static constexpr int kCallerOrder = CoopCallerOrders::kBossShots;
     static constexpr std::uint64_t kKeepUs = 500'000;  // an empty list is sent this long after the last bullet ends
     static constexpr std::size_t kMaxBullets = 32;
+    static constexpr std::uint32_t kBindSteps = 30;  // steps a kept slot may stay empty before it is given up
 
     void SetOn(bool on);
     bool On() const;
@@ -112,7 +114,10 @@ private:
         bool awake = false;          // ours: awake when last read
         std::uint32_t seq = 0;       // ours: its wake's seq; a copy: the owner shot it shows (0: none)
         coop::protocol::Vec3 position{};
-        std::uint64_t actor = 0;     // its actor, read while the slot named it (0: not yet)
+        std::uint64_t actor = 0;     // its actor, read while the slot named its request (0: not yet)
+        std::uint64_t request = 0;   // the first request its slot held (0: none yet)
+        std::uint32_t waits = 0;     // steps with no request in its slot yet
+        bool missed = false;         // its slot changed before its actor was read: never read again
     };
     struct Entry {
         Member member;

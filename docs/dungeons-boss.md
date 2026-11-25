@@ -899,8 +899,11 @@ actor manager (main+0x14acc).
 
 - Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST) and reads each one's actor
   (request +0x08) at the next frames. The game's take of a made actor clears the slot, and the bullets are made in
-  the intro, before she is listed: read later, none gave an actor (NEXT68). The slot is not read again, since it is
-  used for other creates. The bullets are forgotten when her room goes.
+  the intro, before she is listed: read later, none gave an actor (NEXT68). Each bullet is bound to the first
+  request its slot holds; if the slot then holds 0 or another request (taken, or used for another create) before
+  the actor was read, the bullet is given up and counted as missed in the 10 s shots line. A read actor is not read
+  through the slot again, and it is used only while its name (+0x260) is still the bullet's, so an actor freed with
+  a room she was never listed in is never written. The bullets are forgotten when her room goes.
 - The owner's game reads its bullets every frame. A wake (3 to 4) is one shot. The bullets awake now, each with its
   seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 29 `shots`, no protocol bump); an empty
   list is sent for 500 ms after the last one ends.

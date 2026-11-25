@@ -487,14 +487,14 @@ void LogBossShots() {
     }
     const CoopBossShots::Counts c = CoopBossShots::TheTable().GetCounts();
     if (c.owner_kept == said.owner_kept && c.copy_stopped == said.copy_stopped && c.fired == said.fired &&
-        c.dropped == said.dropped && c.restarts == said.restarts) {
+        c.dropped == said.dropped && c.restarts == said.restarts && c.missed == said.missed) {
         return;
     }
     said_ms = now;
     said = c;
     LOG_INFO(Core, "coop: bosses: shots: ours sent {}; copies: {} owner's fired, {} own stopped, {} dropped, {} "
-                   "started again",
-             c.owner_kept, c.fired, c.copy_stopped, c.dropped, c.restarts);
+                   "started again; {} bullets missed (slot changed before their actor was read)",
+             c.owner_kept, c.fired, c.copy_stopped, c.dropped, c.restarts, c.missed);
 }
 
 void LogBossOrders() {

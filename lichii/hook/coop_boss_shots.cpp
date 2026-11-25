@@ -7,6 +7,8 @@
 #include <cmath>
 #include <utility>
 
+#include "coop_fairy.h"
+
 namespace CoopBossShots {
 
 namespace {
@@ -14,12 +16,6 @@ namespace {
 template <typename T>
 bool Get(CoopPuppet::Guest& guest, std::uint64_t address, T& out) {
     return address != 0 && guest.Read(address, &out, sizeof out);
-}
-
-// The bullet's actor now (0: its request or actor is gone).
-std::uint64_t ActorOf(CoopPuppet::Guest& guest, std::uint64_t handle) {
-    std::uint64_t request = 0, actor = 0;
-    return Get(guest, handle, request) && Get(guest, request + addr::kRequestActor, actor) ? actor : 0;
 }
 
 void Put(CoopPuppet::Guest& guest, std::uint64_t actor, std::uint32_t state) {
@@ -57,19 +53,47 @@ void Table::Note(std::string text) {
     }
 }
 
-// The bullet's actor when it is in `state`; 0 when not, or not read yet.
+// The bullet's actor when it is in `state`; 0 when not, not read yet, or no longer that bullet (its room freed
+// while she was never listed: another actor there).
 std::uint64_t Table::Live(CoopPuppet::Guest& guest, Bullet& b, std::uint32_t state) {
     std::uint32_t now = 0;
-    return b.actor != 0 && Get(guest, b.actor + addr::kActorState, now) && now == state ? b.actor : 0;
+    return b.actor != 0 && CoopFairy::ActorNamed(guest, b.actor, b.name) &&
+                   Get(guest, b.actor + addr::kActorState, now) && now == state
+               ? b.actor
+               : 0;
 }
 
 // The game's take of a made actor clears the create's slot (docs/addresses.md, kRequestActor), and her bullets are
-// made in the intro, before she is listed: each actor is read while its slot still names it, and the slot is not
-// read again (it is used for other creates). Her room's bullets go with her room (Publish).
+// made in the intro, before she is listed: each actor is read at the next steps. A bullet is bound to the first
+// request its slot holds; once the slot holds 0 or another request (taken, or used for another create) before its
+// actor was read, or no request came within kBindSteps, it is given up (missed). A read actor is not read again.
 void Table::ReadActors(CoopPuppet::Guest& guest) {
     for (Bullet& b : bullets_) {
-        if (b.actor == 0) {
-            b.actor = ActorOf(guest, b.handle);
+        if (b.actor != 0 || b.missed) {
+            continue;
+        }
+        std::uint64_t request = 0;
+        if (!Get(guest, b.handle, request)) {
+            request = 0;
+        }
+        if (b.request == 0) {
+            b.request = request;
+            if (request == 0 && ++b.waits > kBindSteps) {
+                b.missed = true;
+                ++counts_.missed;
+            }
+            if (request == 0) {
+                continue;
+            }
+        } else if (request != b.request) {
+            b.missed = true;
+            ++counts_.missed;
+            continue;
+        }
+        std::uint64_t actor = 0;
+        if (Get(guest, request + addr::kRequestActor, actor) && actor != 0 &&
+            CoopFairy::ActorNamed(guest, actor, b.name)) {
+            b.actor = actor;
         }
     }
 }
