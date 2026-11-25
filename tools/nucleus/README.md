@@ -9,7 +9,7 @@ The handler is not on the Nucleus handler hub. Install it by hand, as described 
 ## Install
 
 1. Get Nucleus Co-op from its [releases](https://github.com/SplitScreen-Me/splitscreenme-nucleus/releases) (`NucleusApp.zip`, version 2.4.2 or later) and unzip it to a short folder, for example `C:\Nucleus`.
-2. Copy `OoTCoop.js` (the kit's `nucleus\OoTCoop.js`, or this folder's) into its `handlers` folder (`C:\Nucleus\handlers\OoTCoop.js`).
+2. Copy `OoTCoop.js` (the kit's `nucleus\OoTCoop.js`, or this folder's) into its `handlers` folder (`C:\Nucleus\handlers\OoTCoop.js`). Later builds and `Update.bat` replace that copy with the kit's handler by themselves.
 3. Start `NucleusCoop.exe`, click the **+** button (**Add game**; not the handler hub, which does not have this handler) and pick the `longshot.exe` of your kit's co-op game. That is `<kit>\hookshot\game\longshot.exe`, or the folder that `hookshot\game-folder.txt` names. Nucleus lists it as **OoT Co-op (Longshot)**.
 
 ## What it does at each start
