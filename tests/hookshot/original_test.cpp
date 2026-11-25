@@ -281,9 +281,7 @@ TEST_CASE("original game: switch off, the kept file gone and our list left: the 
     REQUIRE(CoopOriginal::ApplyMods(f.mods, false, why));
     CHECK_FALSE(fs::exists(f.mods / "coop-mods.list"));
     // a player's own list with no kept file is never touched
-    const std::string mine = "coop-mods 1
-off some-mod
-";
+    const std::string mine = "coop-mods 1\noff some-mod\n";
     {
         std::ofstream(f.mods / "coop-mods.list", std::ios::binary) << mine;
     }
