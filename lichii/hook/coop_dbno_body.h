@@ -177,9 +177,17 @@ constexpr const char* VerbName(std::int32_t v) {
 inline constexpr std::string_view kLyingPose = "DamageLStand";
 inline constexpr float kHeldRate = 0.0f;
 inline constexpr float kPlayRate = 1.0f;
-// Plays at kPlayRate on getting up (the first, and again if the game's own
-// LDamageStandUp asked the command with skip-if-same and kept it held).
+// Plays at kPlayRate on getting up: the first on the up frame whatever the
+// game put on slot 0 that frame, then again when the game's own LDamageStandUp
+// asked the command with skip-if-same and kept our rate-0 one held.
+// While down the game plays its own DamageS on slot 0 nearly every frame
+// before our caller (fullpass-1: 2700 re-holds in 50 s), so the up frame
+// almost always reads DamageS: a release that needed the held pose there
+// never played, and the game's stand-up then took our held pose as its own
+// (skip-if-same) and waited at rate 0 for ever (the Link lay until a hit).
 inline constexpr int kMaxReleases = 3;
+// Frames after getting up that slot 0 is watched for the held pose.
+inline constexpr int kReleaseFrames = 120;
 // Whether our Link is laid down by kLyingPose now: an adult, lying, not in
 // an event, in our Crawl (taken), not on a horse.
 constexpr bool PoseWanted(bool adult, bool lying, bool event, bool crawling, bool riding) {
@@ -354,6 +362,7 @@ private:
     float pending_rate_ = 0.0f;        // the play call in flight
     std::uint64_t posed_actor_ = 0;    // the actor the pose was last held on (0: none)
     int releases_left_ = 0;            // plays at kPlayRate still allowed (getting up)
+    int release_frames_ = 0;           // frames slot 0 is still watched for the held pose (getting up)
     bool standing_ = false;            // an adult up from the pose: LDamageStandUp asked, the game's own skipped
     int up_asks_ = 0;
     std::string pose_seen_;            // what slot 0 played when the pose was played again (the log)
