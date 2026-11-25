@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -94,6 +95,54 @@ TEST_CASE("hookshot map page: the quick-switch item menu is UIShortCutScreen ope
     CHECK_FALSE(ShortCutShows(0x4be8300, 2));  // the HUD (UIMapMenuScreen): runs every frame in play
     CoopMapPage::Menu older;  // an exe whose patch 0018 does not say the running screens: not known
     CHECK_FALSE(older.screens_known);
+}
+
+TEST_CASE("hookshot map page: no pane lookup on a screen the game has dropped (issue 340: quit to the title, Continue)") {
+    using CoopMapPage::HudSearchDue;
+    using CoopMapPage::PanelSearchDue;
+    constexpr std::uint64_t main = 0x80020000ull;
+    CHECK(CoopMapPage::kHudVtable == 0x84c08300ull - main);     // patch 0018's HUD_SCREEN_VTABLE
+    CHECK(CoopMapPage::kPanelVtable == 0x84c08aa0ull - main);   // and PANEL_FRAME_VTABLE
+    constexpr std::uint64_t hud = 0x7e4c35c0, panel = 0x7e9d35a8;
+    std::map<std::uint64_t, std::uint64_t> memory{
+        {hud, main + CoopMapPage::kHudVtable}, {hud + CoopMapPage::kScreenLayout, 0x7e4c59c0},
+        {panel, main + CoopMapPage::kPanelVtable}, {panel + CoopMapPage::kScreenLayout, 0x7e9d3960}};
+    const auto read = [&](std::uint64_t a) { return memory.count(a) ? memory[a] : 0; };
+
+    CoopMapPage::Menu play;  // in play, the panel open: both run
+    play.hud_screen = hud, play.panel_screen = panel, play.hud_ran_ns_ago = 16'000'000;
+    play.screens_known = true, play.screen_count = 2, play.screens = {hud, panel};
+    CoopScreen::ScreenInstance at_hud, at_panel;
+    CHECK(HudSearchDue(at_hud, play, main, 1000, read));
+    CHECK(PanelSearchDue(at_panel, play, main, 1000, read));
+    CHECK_FALSE(HudSearchDue(at_hud, play, main, 1033, read));  // the same one: searched once
+    CHECK_FALSE(PanelSearchDue(at_panel, play, main, 1033, read));
+
+    // The title, then Continue: patch 0018 still says both addresses, neither runs, and the load writes over the memory.
+    CoopMapPage::Menu loading;
+    loading.hud_screen = hud, loading.panel_screen = panel, loading.hud_ran_ns_ago = 60'000'000'000;
+    loading.screens_known = true;
+    memory[hud + CoopMapPage::kScreenLayout] = 0xffffffffffffffffull;
+    memory[panel + CoopMapPage::kScreenLayout] = 0xffffffffffffffffull;
+    CHECK_FALSE(HudSearchDue(at_hud, loading, main, 61'000, read));
+    CHECK_FALSE(PanelSearchDue(at_panel, loading, main, 61'000, read));
+
+    // Another screen made at the old address runs (patch 0018 keeps calling the address the HUD's): not a HUD, not asked.
+    memory[hud] = main + 0x4be4a18, memory[panel] = main + 0x4be4a18;
+    CHECK_FALSE(HudSearchDue(at_hud, play, main, 62'000, read));
+    CHECK_FALSE(PanelSearchDue(at_panel, play, main, 62'000, read));
+
+    // The game's new screens, at the same two addresses with the same layout addresses: searched again.
+    memory[hud] = main + CoopMapPage::kHudVtable, memory[hud + CoopMapPage::kScreenLayout] = 0x7e4c59c0;
+    memory[panel] = main + CoopMapPage::kPanelVtable, memory[panel + CoopMapPage::kScreenLayout] = 0x7e9d3960;
+    CHECK(HudSearchDue(at_hud, play, main, 63'000, read));
+    CHECK(PanelSearchDue(at_panel, play, main, 63'000, read));
+
+    CoopMapPage::Menu older;  // an exe whose patch 0018 says neither: nothing is called on a screen
+    older.hud_screen = hud, older.panel_screen = panel;
+    CoopScreen::ScreenInstance fresh_hud, fresh_panel;
+    CHECK_FALSE(HudSearchDue(fresh_hud, older, main, 64'000, read));
+    CHECK_FALSE(PanelSearchDue(fresh_panel, older, main, 64'000, read));
 }
 
 TEST_CASE("hookshot draw: IM_COL32 layout") {

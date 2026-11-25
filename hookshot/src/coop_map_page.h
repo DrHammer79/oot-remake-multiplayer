@@ -23,6 +23,7 @@
 #include <optional>
 
 #include "coop/overlay/map_icons.hpp"
+#include "coop_screen_panes.h"
 #include "hos_coop_api.h"
 
 namespace CoopMapPage {
@@ -81,6 +82,28 @@ struct Menu {
 };
 // None: the exe has no patch 0018. Any thread.
 std::optional<Menu> MenuState();
+
+inline constexpr std::uint64_t kHudVtable = 0x4be8300;    // main+: UIMapMenuScreen, the HUD (guest 0x84c08300)
+inline constexpr std::uint64_t kPanelVtable = 0x4be8aa0;  // main+: the panel's frame (guest 0x84c08aa0)
+// Whether Frame asks the game for the map panes in the HUD screen's or the panel's layout now: once for each new one of
+// it (CoopScreen::ScreenInstance), and only while it runs and still is that class (issue 340). Patch 0018 keeps both
+// addresses after the game frees the screens (a quit to the title), and knows a screen by its address alone, so another
+// screen made there counts as running under the old name. The game's pane lookup on a freed layout crashes. A screen
+// that does not run is not read, and is looked at as a new one when it runs again.
+// `read(a)`: the 8 bytes at the game's address a, 0 when not readable.
+template <class Read>
+bool SearchDue(CoopScreen::ScreenInstance& at, std::uint64_t screen, bool runs, std::uint64_t vtable,
+               std::uint64_t now_ms, Read&& read) {
+    return screen != 0 && runs && read(screen) == vtable && at.Next(screen, read(screen + kScreenLayout), true, now_ms);
+}
+template <class Read>
+bool HudSearchDue(CoopScreen::ScreenInstance& at, const Menu& menu, std::uint64_t main, std::uint64_t now_ms, Read&& read) {
+    return SearchDue(at, menu.hud_screen, menu.HudRuns(), main + kHudVtable, now_ms, read);
+}
+template <class Read>
+bool PanelSearchDue(CoopScreen::ScreenInstance& at, const Menu& menu, std::uint64_t main, std::uint64_t now_ms, Read&& read) {
+    return SearchDue(at, menu.panel_screen, menu.Runs(menu.panel_screen), main + kPanelVtable, now_ms, read);
+}
 
 // Row 164 follow-up (PR #316, pr-navi-01112): the R button's item choice, the quick-switch menu. It stops the world as
 // the pause menu does, but it has no focused button, so patch 0018's menu_open never names it. Read from the game:
