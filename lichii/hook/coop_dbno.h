@@ -411,13 +411,16 @@ public:
     Out Frame(std::uint64_t now_us, bool able, bool button, const Vec3& self,
               const std::optional<std::string>& scene, std::span<const Fallen> fallen);
     // Whether the revive button is ours and not the game's now (a downed
-    // player is in reach): Link must not roll away from them.
-    bool TakesButton() const { return target_ != 0; }
+    // player is in reach): Link must not roll away from them. A press that
+    // was ours stays ours until it is let go: once the teammate is up, the
+    // game would take the same held A as a new press (a door, a talk).
+    bool TakesButton() const { return target_ != 0 || kept_; }
     void Reset();
 
 private:
     std::uint8_t target_ = 0;
     bool holding_ = false;
+    bool kept_ = false;  // A held since it was ours
     std::uint64_t sent_us_ = 0;
 };
 
