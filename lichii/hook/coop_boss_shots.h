@@ -105,6 +105,9 @@ public:
     static constexpr std::size_t kMaxQueued = 16;
     static constexpr std::uint64_t kKeepUs = 500'000;  // an owner shot stays in the samples this long
 
+    // SHOOT_FROM: true when the shoot code was called by the Shooter's AI step (its return address below x1).
+    static bool FromAiStep(CoopPuppet::Guest& guest, std::uint64_t args, std::uint64_t main_base);
+
     void SetOn(bool on);
     bool On() const;
 
@@ -116,8 +119,9 @@ public:
     void OnShoot(CoopPuppet::Guest& guest, std::uint64_t args, std::uint64_t record, std::uint64_t main_base,
                  std::uint64_t now_us);
     // CREATE_REQUEST of the shoot code's own create (not ours), on the game's thread: true when `shooter`'s shot
-    // named `name` is not made (a copy that fires the owner's shots).
-    bool StopsOwn(std::uint64_t shooter, std::string_view name);
+    // named `name` is not made (a copy that fires the owner's shots). Only a shot of the AI step (`from_ai_step`,
+    // FromAiStep at its SHOOT_FROM): the owner sends only those, so a shot from the code's other callers is made.
+    bool StopsOwn(std::uint64_t shooter, std::string_view name, bool from_ai_step);
 
     // Ours: the shots this boss fired lately, for its samples (nothing: none, or not ours).
     std::optional<BossShots> OwnerShots(std::uint64_t actor, std::uint64_t now_us);

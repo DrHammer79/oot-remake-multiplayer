@@ -164,9 +164,7 @@ void Table::OnShoot(CoopPuppet::Guest& guest, std::uint64_t args, std::uint64_t 
             return;
         }
     }
-    // Only the AI step's own call: its return address sits below x1 on its stack, x2 at x1 + 0x68.
-    std::uint64_t caller = 0;
-    if (!Get(guest, args - addr::kCallerMark, caller) || caller != main_base + addr::kShootCaller) {
+    if (!FromAiStep(guest, args, main_base)) {
         return;
     }
     const std::uint64_t values = args + addr::kArgValues;
@@ -200,7 +198,16 @@ void Table::OnShoot(CoopPuppet::Guest& guest, std::uint64_t args, std::uint64_t 
     ++counts_.owner_kept;
 }
 
-bool Table::StopsOwn(std::uint64_t shooter, std::string_view name) {
+bool Table::FromAiStep(CoopPuppet::Guest& guest, std::uint64_t args, std::uint64_t main_base) {
+    // The AI step's own call: its return address sits below x1 on its stack, x2 at x1 + 0x68.
+    std::uint64_t caller = 0;
+    return args != 0 && Get(guest, args - addr::kCallerMark, caller) && caller == main_base + addr::kShootCaller;
+}
+
+bool Table::StopsOwn(std::uint64_t shooter, std::string_view name, bool from_ai_step) {
+    if (!from_ai_step) {
+        return false;  // (the owner sends only its AI step's shots: this one comes from no one)
+    }
     std::lock_guard lock(mutex_);
     const auto it = entries_.find(shooter);
     if (!on_ || it == entries_.end() || it->second.member.role != Role::copy || !it->second.owner_came ||

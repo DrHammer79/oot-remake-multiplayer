@@ -1841,6 +1841,8 @@ thread_local bool t_create_stop = false;
 // (SHOOT_FROM's shooter until that thread's next CREATE_REQUEST; used only for
 // the create the shoot code itself makes, by its return address)
 thread_local std::uint64_t t_shooter = 0;
+// (whether that SHOOT_FROM came from the Shooter's AI step, coop_boss_shots.h; same lifetime as t_shooter)
+thread_local bool t_shot_ai = false;
 constexpr std::uint64_t kShootCreateReturn = 0xc17300;  // (after the bl at main+0xc172fc)
 // (LIFE_STEP's verdict for its component until that step's LIFE_STOPS: past its own life stops)
 thread_local std::uint64_t t_life_pass = 0;
@@ -1912,8 +1914,13 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
     case HOS_COOP_WORLD_SHOOT_FROM: {  // (a: its first 8 bytes are the shooter's actor)
         std::uint64_t actor = 0;
         t_shooter = a != 0 && CoopRuntime::Read(a, &actor, sizeof actor) ? actor : 0;
+        t_shot_ai = false;
+        if (t_shooter != 0 && CoopBossShots::TheTable().On()) {
+            BridgeGuest guest;
+            t_shot_ai = CoopBossShots::Table::FromAiStep(guest, a, CoopRuntime::MainBase());
+        }
         // Twinrova hand-over: our boss's shot, kept for its copies (b: the shooter record, x0).
-        if (t_shooter != 0 && !CoopActorEvents::Ours(t_own_call, t_copy_game) && CoopBossShots::TheTable().On()) {
+        if (t_shot_ai && !CoopActorEvents::Ours(t_own_call, t_copy_game) && CoopBossShots::TheTable().On()) {
             BridgeGuest guest;
             CoopBossShots::TheTable().OnShoot(guest, a, b, CoopRuntime::MainBase(), CoopEvery::NowUs());
         }
@@ -1957,13 +1964,14 @@ int World(std::uint32_t event, std::uint64_t a, std::uint64_t b) {
         // The shooter is the one the game's shoot code named, when this is
         // that code's own create; any other create is judged by its place.
         const std::uint64_t shooter = std::exchange(t_shooter, 0);
+        const bool shot_ai = std::exchange(t_shot_ai, false);
         const bool shot = e.from != 0 && e.from == CoopRuntime::MainBase() + kShootCreateReturn;
         t_create_stop = !CoopActorEvents::Ours(t_own_call, t_copy_game) && name[0] != 0 &&
                         (CoopEnemyShots::StopAtCreate(name, {place[0], place[1], place[2]}, shot ? shooter : 0) ||
                          // Native boss sync: a copy boss's own minion (the owner's comes as a copy).
                          CoopBossNative::TheTable().CopyMakes(CoopObjects::MinionMaker(name)) ||
                          // Twinrova hand-over: a copy fires the owner's shots itself (coop_boss_shots.h).
-                         (shot && CoopBossShots::TheTable().StopsOwn(shooter, name)));
+                         (shot && CoopBossShots::TheTable().StopsOwn(shooter, name, shot_ai)));
         if (t_create_stop) {
             e.flags |= CoopActorEvents::kStopped;
         }

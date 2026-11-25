@@ -899,8 +899,9 @@ attack with no bullet. Now the bullet follows the owner's shot, not the copy's A
 - A copy calls the same shoot code itself for each of the owner's shots, once, on its own record of that slot (by
   its key, else by the slot's key hash), with the same values built in a block of guest memory. The call is ours,
   so its bullet is never stopped.
-- Once the owner's first shot has come, the copy's own AI's split shots from the shoot code are not made
-  (CREATE_REQUEST), so each owner shot is one bullet in every game. Before that (a new copy, an older owner) the
+- Once the owner's first shot has come, the copy's own AI step's split shots from the shoot code are not made
+  (CREATE_REQUEST), so each owner shot is one bullet in every game. A split shot from the shoot code's other
+  callers is made as before (the owner sends only its AI step's). Before that (a new copy, an older owner) the
   copy's own shots are made, as before.
 - A hand-over starts it again: the new owner's AI fires on its own, a game made a copy waits for the new owner's
   first shot.

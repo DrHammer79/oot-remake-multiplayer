@@ -3689,11 +3689,11 @@ TEST_CASE("boss shots: a copy fires each owner shot once through the shoot code,
     const bs::Member m = TwinMember(bs::Role::copy, 2);
     t.Publish({&m, 1});
     // Before the owner's first shot: the copy's own shots are made.
-    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", true));
     const bs::BossShot s1{1, "Twinrova_Bullet_Fire", kSlotKey, 1, kKeyHash, 7, 2, 1};
     t.Receive(kTwinrova, bs::BossShots{1, {s1}});
-    CHECK(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
-    CHECK_FALSE(t.StopsOwn(kTwinrova, "Enemy_Other"));  // (not a split shot)
+    CHECK(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", true));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Enemy_Other", true));  // (not a split shot)
     auto calls = ShotFrame(t, g);
     REQUIRE(calls.size() == 2);  // the block, then the shot
     const CoopPuppet::Call& c = calls[1];
@@ -3754,11 +3754,11 @@ TEST_CASE("boss shots: a hand-over starts again (ours fires on its own, a new ow
     // Made ours: our own AI's shots are made.
     m = TwinMember(bs::Role::owner, 0);
     t.Publish({&m, 1});
-    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", true));
     // Then player 3's, whose count starts at 1: its first shot fires.
     m = TwinMember(bs::Role::copy, 3);
     t.Publish({&m, 1});
-    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire"));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", true));
     bs::BossShot n = s;
     n.seq = 1;
     t.Receive(kTwinrova, bs::BossShots{1, {n}});
@@ -3768,5 +3768,22 @@ TEST_CASE("boss shots: a hand-over starts again (ours fires on its own, a new ow
     const bs::Member other{0x2000000, bs::Role::copy, 2, "Enemy_DungeonBoss_Goma"};
     t.Publish({&other, 1});
     t.Receive(0x2000000, bs::BossShots{1, {n}});
-    CHECK_FALSE(t.StopsOwn(0x2000000, "Twinrova_Bullet_Fire"));
+    CHECK_FALSE(t.StopsOwn(0x2000000, "Twinrova_Bullet_Fire", true));
+}
+
+TEST_CASE("boss shots: a copy stops only its AI step's shots, the shoot code's other callers' shots are made") {
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    PutShooter(g, kTwinrova);
+    const bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    t.Receive(kTwinrova, bs::BossShots{1, {{1, "Twinrova_Bullet_Fire", kSlotKey, 0, kKeyHash, 0, 0, 0}}});
+    const std::uint64_t args = PutShootArgs(g, kTwinrova, "Twinrova_Bullet_Fire");
+    CHECK(bs::Table::FromAiStep(g, args, kShotMain));
+    CHECK(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", true));
+    PutAt(g, args - bs::addr::kCallerMark, std::uint64_t{kShotMain + 0x100});  // (another caller)
+    CHECK_FALSE(bs::Table::FromAiStep(g, args, kShotMain));
+    CHECK_FALSE(t.StopsOwn(kTwinrova, "Twinrova_Bullet_Fire", false));
+    CHECK(t.GetCounts().copy_stopped == 1);
 }
