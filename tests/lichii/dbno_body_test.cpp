@@ -1,4 +1,5 @@
 // Tests for our downed Link's body: crawl, shield, unseen, heal (lichii/hook/coop_dbno_body.cpp).
+#include <cstdlib>
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -522,6 +523,63 @@ TEST_CASE("dbno body: a downed adult in Crawl lies in the game's DamageLStand he
     SetAs(g, "Wait", 1.0f);
     CHECK(RunFrame(c, g, 2200).empty());
     CHECK(RunFrame(c, g, 2300).empty());
+}
+
+TEST_CASE("dbno body (NEXT60): the pose held again is noted once a down, its count on the get-up line") {
+    // A test 'hurt' down: the game played DamageS on slot 0 nearly every frame, and the 'held again' line ran
+    // to 1300 (every 100th). Once a down is enough; the get-up line carries the count.
+    Guest g;
+    MakeAs(g, "Wait", 1.0f);
+    Crawl c;
+    c.Want(Want(false, false, true, kActor));
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    c.Want(Want(true, false, true, kActor));
+    RunFrame(c, g, 984);
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    RunFrame(c, g, 1000);
+    SetAs(g, "Crouch", 1.0f);
+    RunFrame(c, g, 1100);  // held the first time
+    std::uint64_t ms = 1200;
+    for (int i = 0; i < 250; ++i, ms += 16) {
+        SetAs(g, "DamageS", 1.0f);
+        RunFrame(c, g, ms);
+    }
+    c.Want(Want(false, false, true, kActor));
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    RunFrame(c, g, ms);
+    int again = 0;
+    bool up_count = false;
+    for (const auto& n : c.TakeNotes()) {
+        again += n.find("held again (") != std::string::npos ? 1 : 0;
+        up_count = up_count || (n.find("played on from the held pose") != std::string::npos &&
+                                n.find("held again 250 times") != std::string::npos);
+    }
+    CHECK(again == 1);
+    CHECK(up_count);
+
+    // A second down of the same Link: one note again, and its own count.
+    ms += 2000;
+    c.Want(Want(true, false, true, kActor));
+    for (int i = 0; i < 40; ++i, ms += 16) {
+        c.Skip(kBsa, Req(verb::kWait, 2), false);
+        SetAs(g, "DamageS", 1.0f);
+        RunFrame(c, g, ms);
+    }
+    c.Want(Want(false, false, true, kActor));
+    c.Skip(kBsa, Req(verb::kWait, 2), false);
+    RunFrame(c, g, ms);
+    again = 0;
+    bool second_count = false;
+    std::string up_line;
+    for (const auto& n : c.TakeNotes()) {
+        again += n.find("held again (") != std::string::npos ? 1 : 0;
+        if (n.find("played on from the held pose") != std::string::npos) up_line = n;
+    }
+    const auto at = up_line.find("held again ");
+    const int count = at == std::string::npos ? -1 : std::atoi(up_line.c_str() + at + 11);
+    second_count = count >= 1 && count <= 40;  // this down's own, not the first down's 250 on top
+    CHECK(again == 1);
+    CHECK(second_count);
 }
 
 TEST_CASE("dbno body: getting up, a stand-up the game keeps held is played on again (bounded), a busy slot asked again") {
