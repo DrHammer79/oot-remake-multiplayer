@@ -22,6 +22,7 @@
 #include "common/logging.h"
 
 #include "coop/host/game_items.hpp"
+#include "coop/host/map_drop_log.hpp"
 #include "coop/host/save_transfer.hpp"
 #include "coop/net/client.hpp"
 #include "coop/protocol/messages.hpp"
@@ -675,6 +676,7 @@ void NoteTitle(bool title_up) {
     if (title_up && !g_title_up) {
         FixSlotsLocked();      // (rows 239/240/241: before the player can load one of them)
         g_played.on_title();   // (a new pick follows: a file, or New Game)
+        coop::host::map_drop_log().game_reset("the title");   // row 269: its flags are cleared there, not dropped in play
         if (g_playthroughs) g_playthroughs->OnTitle();
         g_playthrough_slot.reset();   // (the next load or save is a new pick, even of the same slot)
         g_title_seen = true;
@@ -816,6 +818,8 @@ bool CanResync() {
 
 void NoteGameSaveLoad(bool start) {
     NoteLoadWindowMark(start);   // player report 120: the slot the game loads (save::PlayedSlot)
+    // Row 269: the game cleared its flag table for this load a moment ago: no map or compass dropped in play.
+    coop::host::map_drop_log().game_reset(start ? "the game starts loading a save" : "the game loaded a save");
     const long long now = NowMs();
     if (start) {
         g_load_starts.fetch_add(1, std::memory_order_relaxed);
