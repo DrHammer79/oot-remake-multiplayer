@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -96,6 +97,21 @@ void Crawl::Want(const Wanted& w) {
         releases_left_ = kMaxReleases;
         release_frames_ = kReleaseFrames;
     }
+    if (probe_ < 0) {
+        const char* e = std::getenv("LICHII_COOP_DBNO_PROBE");
+        probe_ = e && e[0] == '1' ? 1 : 0;
+    }
+    if (probe_ == 1 && w.lying && !want_.lying) {
+        ++probe_downs_;
+        probe_variant_ = (probe_downs_ - 1) % 3 + 1;
+        probe_frames_ = 0;
+        probe_verbs_.clear();
+        Note("PROBE down " + std::to_string(probe_downs_) + " variant " + std::to_string(probe_variant_) +
+             (probe_variant_ == 1 ? " (log only)" : probe_variant_ == 2 ? " (the hit's own verb runs)" : " (no lying pose)"));
+    }
+    if (!w.lying) {
+        probe_variant_ = 0;
+    }
     if (w.lying || w.event || w.actor != posed_actor_) {
         standing_ = false;
     }
@@ -157,6 +173,9 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
     // Our ask's slot: a request the game takes on it now keeps it busy
     // until the BSA's next update (ours would get kSlotBusy).
     const bool our_slot = learnt_ && a->slot == slot_;
+    if (probe_variant_ != 0 && our_slot && probe_verbs_.size() < 200) {
+        probe_verbs_ += std::to_string(a->verb) + (crawling_ ? "c " : " ");
+    }
     if (standing_ && our_slot && !want_.lying && !want_.event && !Passes(a->verb) &&
         a->verb != verb::kLDamageStandUp) {
         // Our adult gets up from the pose: the slot is left to our LDamageStandUp.
@@ -178,7 +197,7 @@ bool Crawl::Skip(std::uint64_t bsa, const CoopBossNative::Request& request, bool
             airborne_ = false;
             ground_seen_ = true;  // (Next starts a new round when one is due)
         }
-        if (our_slot && Trying()) {
+        if (our_slot && Trying() && !(probe_variant_ == 2 && !ground)) {
             // A crawl round is on: the game takes one request per slot a
             // frame, so its own (asked before our caller runs) would take
             // the slot and ours would get kSlotBusy. (Its requests on other
@@ -297,6 +316,15 @@ std::optional<CoopPuppet::Call> Crawl::StepPose(CoopPuppet::Guest& guest, std::u
         return std::nullopt;
     }
     const bool held = slot && slot->name == kLyingPose && slot->rate == kHeldRate;
+    if (probe_variant_ != 0 && probe_frames_++ % 30 == 0) {
+        Note("PROBE f " + std::to_string(probe_frames_ - 1) + " crawling " + std::to_string(crawling_) + " slot0 '" +
+             (slot ? slot->name : std::string("?")) + "' frame " + (slot ? std::to_string(slot->frame) : std::string("?")) +
+             " rate " + (slot ? std::to_string(slot->rate) : std::string("?")) + " our-slot verbs: " + probe_verbs_);
+        probe_verbs_.clear();
+    }
+    if (probe_variant_ == 3) {
+        return std::nullopt;
+    }
     if (PoseWanted(want_.adult, want_.lying, want_.event, crawling_, riding_)) {
         if (held) {
             return std::nullopt;

@@ -362,7 +362,14 @@ private:
     float pending_rate_ = 0.0f;        // the play call in flight
     std::uint64_t posed_actor_ = 0;    // the actor the pose was last held on (0: none)
     int releases_left_ = 0;            // plays at kPlayRate still allowed (getting up)
-    int release_frames_ = 0;           // frames slot 0 is still watched for the held pose (getting up)
+    int release_frames_ = 0;
+    // PROBE (dbno-slide, not for merge): LICHII_COOP_DBNO_PROBE=1 cycles each down through 1 log only,
+    // 2 the downing hit's own verb runs, 3 no lying pose; logs slot 0 and our slot's verbs every 30 frames.
+    int probe_ = -1;
+    int probe_downs_ = 0;
+    int probe_variant_ = 0;
+    int probe_frames_ = 0;
+    std::string probe_verbs_;           // frames slot 0 is still watched for the held pose (getting up)
     bool standing_ = false;            // an adult up from the pose: LDamageStandUp asked, the game's own skipped
     int up_asks_ = 0;
     std::string pose_seen_;            // what slot 0 played when the pose was played again (the log)
