@@ -3159,7 +3159,7 @@ function Resume-KitStartLog([bool]$Was) {
 # an update of the kit did not replace it there: the instances kept an old handler's ways (only DLLs brought over).
 # So every build and every Update.bat puts the kit's handler over each copy found. Found: the Nucleus folder of each
 # instance the handler noted (<game>\nucleus-players\instances.txt, "<player>=<Nucleus>\content\<game>\Instance<n>"),
-# and "<drive>:\Nucleus Coop" on each fixed drive. Only a handlers folder that already has OoTCoop.js is changed (a
+# and "<drive>:\Nucleus Coop" and "<drive>:\Nucleus" (where the handler's README puts it) on each fixed drive. Only a handlers folder that already has OoTCoop.js is changed (a
 # Nucleus the player never set up for co-op is left alone). Returns the handlers files replaced; never throws.
 function Update-KitNucleusHandler([string]$Kit, [string]$Game = '', [string[]]$Roots = $null) {
     $done = @()
@@ -3180,7 +3180,7 @@ function Update-KitNucleusHandler([string]$Kit, [string]$Game = '', [string[]]$R
         }
         if ($null -eq $Roots) {
             $Roots = @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady } |
-                       ForEach-Object { Join-Path $_.RootDirectory.FullName 'Nucleus Coop' })
+                       ForEach-Object { $r = $_.RootDirectory.FullName; (Join-Path $r 'Nucleus Coop'), (Join-Path $r 'Nucleus') })
         }
         foreach ($r in $Roots) { $dirs += Join-Path $r 'handlers' }
         $want = [System.IO.File]::ReadAllBytes($src)

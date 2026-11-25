@@ -66,9 +66,11 @@ struct Glue {
             s.status = p.status.value_or(0);
             seen.players.push_back(std::move(s));
         }
+        if (host_before != 0 && seen.host != 0 && host_before != seen.host) {
+            LOG_INFO(Core, "coop: lobby: the host is now player {} (was {})", seen.host, host_before);
+        }
         if (auto line = HostChangedLine(host_before, seen.host, NameOf(seen.host), seen.host == seen.self);
             !line.empty()) {
-            LOG_INFO(Core, "coop: lobby: the host is now player {}", seen.host);
             Line(std::move(line));
         }
         Refresh();

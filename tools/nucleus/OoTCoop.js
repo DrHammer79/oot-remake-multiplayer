@@ -517,8 +517,28 @@ function coopTell(text) {
 // - a file the handler copied that the game folder no longer has is removed (listed in coop-linked.txt).
 // Each player's own files and folders are never touched: what the game writes beside its exe (settings, the player
 // key, the co-op options and saves list, caches, logs) and the folders Game.DirExclusions names.
-var COOP_OWN_DIRS = /^(user|nucleus-players|logs|cache|modcache|gold-race|bug-reports)$/i;
-var COOP_OWN_FILES = /^(.*\.ini|player-key\.txt|language\.txt|coop-linked\.txt|coop-(?!built-from\.txt$).*\.txt)$/i;
+// One rule for "a game writes it", with Nucleus's own lists above (Game.DirExclusions, Game.FileSymlinkExclusions,
+// Game.FileSymlinkCopyInstead) and the kit's local co-op (local-coop.ps1): the logs, and every cache .bin a game
+// writes (in place, or through a .tmp moved over Nucleus's link: the instance's own file then). Only image.bin and the
+// shipped pipeline states are the build's own .bin files (as tools/autotest/lanes.py SHARED_FILE).
+var COOP_OWN_DIRS = /^(user|nucleus-players|logs|cache|modcache|gold-race|bug-reports|local-players|playtest)$/i;
+var COOP_OWN_FILES = /^(.*\.ini|player-key\.txt|language\.txt|coop-linked\.txt|coop-(?!built-from\.txt$).*\.txt|(longshot|hookshot)_log.*\.txt|control\.json|.*\.warming|.*\.tmp|(?!image\.bin$)(?!.*_shipped\.bin$).*\.bin)$/i;
+function coopListed(list, name) {
+    var n = String(name).toLowerCase(), i;
+    for (i = 0; list && i < list.length; i++) {
+        if (String(list[i]).toLowerCase() === n) {
+            return true;
+        }
+    }
+    return false;
+}
+function coopOwnDir(name) {
+    return COOP_OWN_DIRS.test(name) || coopListed(Game.DirExclusions, name);
+}
+function coopOwnFile(name) {
+    return COOP_OWN_FILES.test(name) || coopListed(Game.FileSymlinkExclusions, name) ||
+           coopListed(Game.FileSymlinkCopyInstead, name);
+}
 function coopSameFile(a, b) {
     try {
         var fa = new System.IO.FileInfo(a), fb = new System.IO.FileInfo(b);
@@ -547,7 +567,7 @@ function coopLinkMissing(game, inst) {
         from = String(dirs[i]);
         name = String(System.IO.Path.GetFileName(from));
         to = coopPath(inst, name);
-        if (!COOP_OWN_DIRS.test(name) && !System.IO.Directory.Exists(to) && !System.IO.File.Exists(to)) {
+        if (!coopOwnDir(name) && !System.IO.Directory.Exists(to) && !System.IO.File.Exists(to)) {
             coopLinkFolder(to, from);
             Context.Log("OoT Co-op: linked the game's " + name + " folder into " + inst);
         }
@@ -560,7 +580,7 @@ function coopLinkMissing(game, inst) {
         from = String(files[i]);
         name = String(System.IO.Path.GetFileName(from));
         to = coopPath(inst, name);
-        if (COOP_OWN_FILES.test(name)) {
+        if (coopOwnFile(name)) {
             continue;
         }
         now[name.toLowerCase()] = true;
@@ -577,7 +597,7 @@ function coopLinkMissing(game, inst) {
     }
     for (i = 0; i < marked.length; i++) {
         name = coopTrim(marked[i]);
-        if (name === "" || COOP_OWN_FILES.test(name)) {
+        if (name === "" || coopOwnFile(name)) {
             continue;
         }
         if (now[name.toLowerCase()]) {

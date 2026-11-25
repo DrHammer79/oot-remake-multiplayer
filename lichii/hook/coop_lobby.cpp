@@ -256,9 +256,9 @@ std::string AnswerLine(std::string_view name, bool allow, bool always) {
 }
 
 std::string HostChangedLine(std::uint8_t before, std::uint8_t after, std::string_view name, bool self) {
-    if (before == 0 || after == 0 || before == after) return {};
-    return self ? std::string("you are now the host: the others play your save")
-                : std::string(name) + " is now the host: their save is the one played";
+    // (this game: the host_changed event's own line says it, "you host now: ...", in the player's language)
+    if (before == 0 || after == 0 || before == after || self) return {};
+    return std::string(name) + " is now the host: their save is the one played";
 }
 
 std::string TitleHostLine(bool connected, bool self_hosts, std::string_view host_name) {

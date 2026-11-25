@@ -103,7 +103,8 @@ std::string NoKnockLine(std::string_view word, std::string_view who);
 // The chat line for a joiner whose own join waits for the host (its JOIN_KNOCK).
 std::string WaitingLine(std::uint16_t wait_s);
 
-// The chat line when the session's host changes (the host left, another took over): "" when nothing changed.
+// The chat line when the session's host changes to another game (the host left, another took over): "" when nothing
+// changed, and when this game is the new host (the host_changed event's own line says that).
 // `before`/`after`: the host's number (0 none), `name`: the new host's, `self`: the new host is this game.
 std::string HostChangedLine(std::uint8_t before, std::uint8_t after, std::string_view name, bool self);
 // The title's hint line in a session: who hosts, so a player knows whose save Continue loads. "" when not connected.

@@ -150,6 +150,16 @@ writeFile(fso.BuildPath(instances[1], "exefs_patches.txt"), "old build");
 writeFile(fso.BuildPath(instances[1], "gone.dll"), "old");
 writeFile(fso.BuildPath(instances[1], "coop-linked.txt"), "gone.dll\r\n");
 writeFile(fso.BuildPath(instances[1], "language.txt"), "player 2's");
+// What each game writes beside its exe: its log, the caches it writes in place (Game.FileSymlinkCopyInstead) and
+// the big one it writes through a .tmp over Nucleus's link. The game folder has its own, with other bytes: kept.
+writeFile(fso.BuildPath(game, "longshot_log.txt"), "the solo game's log");
+writeFile(fso.BuildPath(game, "longshot_pipeline_states.bin"), "solo states");
+writeFile(fso.BuildPath(game, "longshot_pipelines.bin"), "solo pipelines");
+writeFile(fso.BuildPath(game, "longshot_pipeline_states_shipped.bin"), "shipped, new build");
+writeFile(fso.BuildPath(instances[1], "longshot_log.txt"), "player 2's log");
+writeFile(fso.BuildPath(instances[1], "longshot_pipeline_states.bin"), "player 2's states");
+writeFile(fso.BuildPath(instances[1], "longshot_pipelines.bin"), "player 2's pipelines");
+writeFile(fso.BuildPath(instances[1], "longshot_pipeline_states_shipped.bin"), "shipped, an older build");
 // Instance 1 has a real user folder from an earlier start (Nucleus copied it): kept beside, renamed.
 mkdirs(fso.BuildPath(instances[1], "user"));
 
@@ -229,6 +239,11 @@ check(readFile(fso.BuildPath(instances[0], "texts\en.txt")) === "words", "a fold
 check(!fso.FolderExists(fso.BuildPath(instances[0], "cache")), "the game's cache is not taken");
 check(!fso.FileExists(fso.BuildPath(instances[1], "gone.dll")), "a copied file the game no longer has is removed");
 check(readFile(fso.BuildPath(instances[1], "language.txt")) === "player 2's", "a player's own setting is kept");
+check(readFile(fso.BuildPath(instances[1], "longshot_log.txt")) === "player 2's log", "a player's own log is kept");
+check(readFile(fso.BuildPath(instances[1], "longshot_pipeline_states.bin")) === "player 2's states" &&
+      readFile(fso.BuildPath(instances[1], "longshot_pipelines.bin")) === "player 2's pipelines", "a player's own shader caches are kept");
+check(readFile(fso.BuildPath(instances[1], "longshot_pipeline_states_shipped.bin")) === "shipped, new build", "the build's shipped pipeline states are brought up to date");
+check(!fso.FileExists(fso.BuildPath(instances[0], "longshot_log.txt")) && !fso.FileExists(fso.BuildPath(instances[0], "longshot_pipelines.bin")), "a game's log and caches are not copied into an instance without them");
 check(!fso.FileExists(fso.BuildPath(instances[1], "coop-saves.ini")) && !fso.FileExists(fso.BuildPath(instances[1], "coop-name-checked.txt")), "per-player files the solo game wrote are not taken");
 check(!fso.FolderExists(fso.BuildPath(instances[0], "logs")), "logs stay the instance's own");
 var noted = readFile(fso.BuildPath(game, "nucleus-players\\instances.txt"));
