@@ -79,6 +79,7 @@ Game.KillProcessesOnClose = ["coop_server"];   // the session's server (and any 
 // The session's settings (also in nucleus-players\session.txt, for a start that runs the script anew per player).
 var COOP_KIT_PORT = 27510;   // the kit's coop.ini port, else this one (Host.bat's)
 var coopSession = null;
+var coopHostBlocked = false;  // host mode: player 1 found a server already running, no game of this session starts
 var coopJoinFailed = false;   // join mode: player 1 found no usable host code, the later players start nothing either
 
 function coopPath(a, b) {
@@ -507,6 +508,8 @@ function coopTell(text) {
 // looks for it beside its exe, so in the instance) is linked in as a junction (always the game's current one), and each
 // build DLL the instance lacks is copied in. A DLL the handler copied is copied again at every start (a rebuild
 // replaces the file, and a copy would keep the old bytes); those are listed in the instance's coop-linked.txt.
+// exefs_patches.txt goes the same way: the build's list of the mods' code built into the exe. Without it the game
+// takes a mod with code (Character Select) as not built in and turns it off: its tab shows, but cannot be opened.
 var COOP_LINK_DIRS = ["ngx"];
 function coopLinkMissing(game, inst) {
     var i, name, from, to;
@@ -527,7 +530,7 @@ function coopLinkMissing(game, inst) {
         from = String(files[i]);
         name = String(System.IO.Path.GetFileName(from));
         to = coopPath(inst, name);
-        if (!/\.dll$/i.test(name)) {
+        if (!/\.dll$/i.test(name) && !/^exefs_patches\.txt$/i.test(name)) {
             continue;
         }
         var mine = marked.indexOf("\n" + name + "\n") >= 0;
@@ -619,16 +622,21 @@ Game.Play = function () {
             }
             Context.Log("OoT Co-op: join a game on this network (join_lan = " + coopSession.lan + "): no server started");
         }
+    } else if (!join && !remote && player !== 1 && coopHostBlocked) {
+        throw new Error("Host on this PC: a co-op server was already running (see player 1's message)");
     } else if (player === 1) {
         var running = kit !== "" ? coopServersRunning() : 0;
+        coopHostBlocked = false;
         if (running > 0) {
-            // Another server (Host.bat, start-server.cmd, an earlier session not ended) holds the port or has
-            // another join password: this session's games could not join. Nothing is started; it is not closed here
-            // (a friend may be playing on it).
-            coopSession = { password: coopNewKey(), server: "127.0.0.1", port: COOP_KIT_PORT, pads: 0 };
-            coopTell("A co-op server (coop_server.exe) is already running on this PC, so this session starts none " +
-                     "and its games cannot join. Close that server's window, end this " +
-                     "session in Nucleus and press Play again.");
+            // Another server (Host.bat, start-server.cmd, an earlier session not ended) is running. Its session may
+            // have another player as host (the one left when this PC's player 1 went): a game of this session
+            // joining it would be a guest there and load that host's save, not player 1's. So no game starts. The
+            // server is not closed here (a friend may be playing on it).
+            coopHostBlocked = true;
+            coopTell("A co-op server (coop_server.exe) is already running on this PC, so nothing is started: " +
+                     "this PC's games would join that session as guests, not host it. Close that server's " +
+                     "window (Squadala server), end this session in Nucleus and press Play again.");
+            throw new Error("Host on this PC: a co-op server is already running on this PC");
         } else if (kit !== "" && System.IO.File.Exists(coopPath(kit, "start-server.cmd"))) {
             coopSession = coopStartOnline(kit);
             Context.Log("OoT Co-op: the server window shows the relay's join code or room, and the invite code (one copied)");

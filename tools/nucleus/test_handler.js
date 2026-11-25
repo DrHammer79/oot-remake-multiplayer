@@ -116,6 +116,7 @@ mkdirs(fso.BuildPath(game, "ngx"));                       // DLSS's runtime, bui
 writeFile(fso.BuildPath(game, "ngx\\nvngx_dlss.dll"), "dlss");
 mkdirs(fso.BuildPath(game, "logs"));
 writeFile(fso.BuildPath(game, "newfile.dll"), "new");
+writeFile(fso.BuildPath(game, "exefs_patches.txt"), "built with");
 writeFile(fso.BuildPath(game, "coop.ini"), "own");
 writeFile(fso.BuildPath(game, "coop-saves.ini"), "solo");
 writeFile(fso.BuildPath(game, "coop-name-checked.txt"), "solo");
@@ -208,6 +209,7 @@ for (var q = 0; q < 3; q++) {
 }
 check(readFile(fso.BuildPath(instances[0], "ngx\\nvngx_dlss.dll")) === "dlss" && (fso.GetFolder(fso.BuildPath(instances[0], "ngx")).Attributes & 1024) !== 0, "ngx folder linked into an instance made before it");
 check(readFile(fso.BuildPath(instances[1], "newfile.dll")) === "new", "a new game DLL copied in");
+check(readFile(fso.BuildPath(instances[1], "exefs_patches.txt")) === "built with", "the build's mod code list copied in");
 check(!fso.FileExists(fso.BuildPath(instances[1], "coop-saves.ini")) && !fso.FileExists(fso.BuildPath(instances[1], "coop-name-checked.txt")), "per-player files the solo game wrote are not taken");
 check(!fso.FolderExists(fso.BuildPath(instances[0], "logs")), "logs stay the instance's own");
 var noted = readFile(fso.BuildPath(game, "nucleus-players\\instances.txt"));
@@ -393,8 +395,11 @@ check(threw && startedWindows.length === 1 && /^[0-9a-f]{32}$/.test(startedWindo
 newSession();
 logged = [];
 System.Diagnostics.Process.running = 1;
-playAs(0);
+var blocked = 0;
+try { playAs(0); } catch (e) { blocked++; }
+try { playAs(1); } catch (e) { blocked++; }
 System.Diagnostics.Process.running = 0;
+check(blocked === 2, "a running server: no game of the session starts (it would be a guest there): " + blocked);
 check(startedWindows.length === 0 && startedServers.length === 0, "a running server: none started");
 check(logged.join("\n").indexOf("already running") >= 0, "a running server: the player is told: " + logged.join(" | "));
 

@@ -1088,3 +1088,12 @@ TEST_CASE("save transfer: every state that ends the ask also ends 'coming'") {
   save::note_part(g, 7, 6 * s);   // a new transfer clears gave_up again
   CHECK_FALSE(g.gave_up);
 }
+
+TEST_CASE("save transfer: the slot last played is kept through the title (the host asked there sends it)") {
+  save::PlayedSlot p;
+  const fs::path a = "save/slot_00";
+  p.on_open(a, true, 1);   // the game saved into slot_00
+  p.on_title();
+  CHECK_FALSE(p.slot());
+  CHECK(p.last() == a);
+}

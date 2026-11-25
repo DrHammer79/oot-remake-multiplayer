@@ -1091,7 +1091,9 @@ void OnFrame(coop::net::Client& client, bool host_reset) {
             bool played = send.fresh;   // (a save written after the ask: the newest slot is the game now)
             const auto slot_dir = send.no_save ? std::nullopt
                                   : send.fresh ? save::newest_slot(g_dir)
-                                               : save::slot_to_send(g_dir, g_played.slot(), &played);
+                                               : save::slot_to_send(g_dir, g_played.slot() || g_in_game ? g_played.slot()
+                                                                                             : g_played.last(),
+                                                                     &played);
             const auto slot = slot_dir ? save::read_slot(*slot_dir) : std::nullopt;
             const auto packed =
                 send.no_save ? save::pack_no_save() : (slot ? save::pack(*slot) : std::vector<std::uint8_t>{});
