@@ -930,6 +930,31 @@ std::string_view AnimationBase(std::string_view name) {
     return name;
 }
 
+void OwnChoices::Saw(std::uint64_t address, std::string_view in_slot, std::string_view ours_last,
+                     std::string_view to_play, std::uint64_t now_ms) {
+    if (in_slot.empty() || AnimationBase(in_slot) == AnimationBase(to_play) ||
+        (!ours_last.empty() && AnimationBase(in_slot) == AnimationBase(ours_last))) {
+        return;
+    }
+    if (chosen_.size() >= kMax && !chosen_.contains(address)) {
+        const auto oldest = std::min_element(chosen_.begin(), chosen_.end(), [](const auto& a, const auto& b) {
+            return a.second.second < b.second.second;
+        });
+        chosen_.erase(oldest);
+    }
+    chosen_[address] = {std::string(in_slot), now_ms};
+}
+
+std::optional<std::string> OwnChoices::Take(std::uint64_t address) {
+    const auto it = chosen_.find(address);
+    if (it == chosen_.end()) {
+        return std::nullopt;
+    }
+    std::string name = std::move(it->second.first);
+    chosen_.erase(it);
+    return name;
+}
+
 bool IsDeathAnimation(std::string_view name) {
     return coop::protocol::anim::IsDeath(name);
 }

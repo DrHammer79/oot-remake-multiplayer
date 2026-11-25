@@ -31,6 +31,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <span>
 #include <set>
 #include <string>
@@ -591,6 +592,25 @@ bool IsStunFor(std::string_view actor, std::string_view animation);
 // An animation name without its level-of-detail suffix ("Wait_ModelOnlyLOD"
 // is "Wait"), so a far copy's LOD variant is not another animation.
 std::string_view AnimationBase(std::string_view name);
+
+// Issue 157 (Spirit Temple Lizalfos, Like Like 'Eat_Loop'): the animation each posed copy's own AI chose last,
+// which the Mover put back under the owner's play. Its AI chose once and waits for that play's end, so when the
+// copy becomes ours the play is given back once, however long ago it was chosen (it chose nothing since: a newer
+// choice replaces it). An earlier play of ours still in the slot is not its AI's choice.
+class OwnChoices {
+public:
+    static constexpr std::size_t kMax = 256;
+    // `in_slot`: slot 0's animation now; `ours_last`: the last one we played on it ("" none); `to_play`: ours now.
+    void Saw(std::uint64_t address, std::string_view in_slot, std::string_view ours_last, std::string_view to_play,
+             std::uint64_t now_ms);
+    // The choice to give back once it is ours (and forgotten), or none.
+    std::optional<std::string> Take(std::uint64_t address);
+    void Drop(std::uint64_t address) { chosen_.erase(address); }
+    std::size_t Size() const { return chosen_.size(); }
+
+private:
+    std::unordered_map<std::uint64_t, std::pair<std::string, std::uint64_t>> chosen_;
+};
 
 // Enemies made of several actors (docs/objects.md, "Groups"): a boss and its
 // parts, an enemy and what it summons. Each part follows a root of one of the

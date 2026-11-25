@@ -8879,3 +8879,24 @@ TEST_CASE("objects: a boss part its boss holds 10 s past the grace is said once,
     CHECK(said(copy) == 0);  // once
     CHECK(copy.Removes().empty());
 }
+
+TEST_CASE("objects: a copy made ours gets its AI's old choice back, not our earlier play (Spirit Temple Lizalfos)") {
+    CoopObjects::OwnChoices c;
+    // Its AI chose 'Walk' once under the owner's 'Wait', then waited for that play's end.
+    c.Saw(0x10, "Walk", "", "Wait", 1'000);
+    // The owner's plays went on; our own earlier 'Wait' in the slot is no choice of its AI.
+    c.Saw(0x10, "Wait", "Wait", "Attack", 30'000);
+    c.Saw(0x10, "Wait_ModelOnlyLOD", "", "Wait", 31'000);  // a LOD variant of ours: no choice either
+    // Handed to us minutes later: 'Walk' is given back once (the 8 s limit dropped it).
+    const auto back = c.Take(0x10);
+    REQUIRE(back.has_value());
+    CHECK(*back == "Walk");
+    CHECK_FALSE(c.Take(0x10).has_value());
+    // A newer choice replaces the old one; a give-back of its own wake forgets it.
+    c.Saw(0x20, "Walk", "", "Wait", 1'000);
+    c.Saw(0x20, "Uproar", "Wait", "Wait", 2'000);
+    CHECK(*c.Take(0x20) == "Uproar");
+    c.Saw(0x30, "Eat_Start", "", "Eat_Loop", 1'000);
+    c.Drop(0x30);
+    CHECK_FALSE(c.Take(0x30).has_value());
+}
