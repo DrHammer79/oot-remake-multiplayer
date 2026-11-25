@@ -2772,7 +2772,10 @@ public:
             }
         }
         // jabu-lifts (#65): our lifts another player stands on get RideOnPlayer, as our Link's contact gives it.
-        if (lift_ride_on_) {
+        // Never in race mode: each player's world is their own there, and a puppet on our lift moved it (the same
+        // rule as the switch stander below; the puppets' places are public, so no message gate stops this path).
+        const bool world_answers_puppets = !CoopRaceMode::InForce();
+        if (lift_ride_on_ && world_answers_puppets) {
             auto& rider = CoopLiftRide::TheRider();
             rider.Want(CoopLiftRide::Ridden(ride_lifts_, sync_.OthersHere(server_now_us)), main_, SteadyNowMs());
             for (const auto& line : rider.TakeNotes()) {
@@ -2781,13 +2784,17 @@ public:
         }
         // ai-switches: held step switches, anyone stands on it; the host's setting, and never in race mode (nothing
         // of the world is shared there; this path sends no message for race_private to stop).
-        if (switch_stand_on_ && CoopSwitchStandMode::InForce() && !CoopRaceMode::InForce()) {
+        if (switch_stand_on_ && CoopSwitchStandMode::InForce() && world_answers_puppets) {
             auto& stander = CoopLiftRide::TheStander();
             const auto others = sync_.OthersHere(server_now_us);
             const auto stood = CoopLiftRide::Stood(stand_switches_, others);
-            // (NEXT40 found nothing pressed: every 5 s with switches here, what the footprint sees)
-            if (!stand_switches_.empty() && SteadyNowMs() >= stand_note_ms_) {
-                stand_note_ms_ = SteadyNowMs() + 5000;
+            // (NEXT40 found nothing pressed: what the footprint sees, said when the count of switches here, of
+            // other players here or of switches stood on changes, never solo and never as a steady 5 s line)
+            const std::array<std::size_t, 3> footprint{stand_switches_.size(), others.size(), stood.size()};
+            if (stand_switches_.empty() || others.empty()) {
+                stand_note_ = {};  // said again when another player comes back here
+            } else if (footprint != stand_note_) {
+                stand_note_ = footprint;
                 float best = 1e9f, dx = 0, dy = 0, dz = 0;
                 for (const auto& s : stand_switches_) {
                     for (const auto& o : others) {
@@ -3145,7 +3152,7 @@ public:
     std::vector<CoopLiftRide::Lift> ride_lifts_;  // jabu-lifts (#65): this walk's lifts
     bool lift_ride_on_ = true;                    // LICHII_COOP_LIFT_RIDE=0 turns it off
     std::vector<CoopLiftRide::Lift> stand_switches_;  // ai-switches: this walk's step switches
-    std::uint64_t stand_note_ms_ = 0;                 // ai-switches: the next footprint note
+    std::array<std::size_t, 3> stand_note_{};         // ai-switches: the footprint last said (switches, others, stood)
     bool switch_stand_on_ = true;                     // LICHII_COOP_SWITCH_STAND=0 turns it off
     bool scrubs_on_ = true;  // LICHII_COOP_SCRUBS=0 turns it off (issue 149)
     std::vector<CoopScrubs::Seen> scrubs_seen_;

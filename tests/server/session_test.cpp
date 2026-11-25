@@ -3848,13 +3848,14 @@ TEST_CASE("ai-stuns: a stun on a plain enemy's copy hands it to the stunner, and
   h.clear();
   h.receive(2, ObjectSample{0, placed(7), 1, state_at(1, 12)}, kChannelObjectSamples);
   CHECK(messages_to<ObjectSample>(h, 3).size() == 1);
-  // Player 3's stun within 5 s of the change waits.
-  h.run(kSecond);
+  // Player 3's stun within 1 s of the change waits (stun_handover_cooldown_us).
+  h.run(kSecond / 2);
   h.clear();
   h.receive(3, Damage{0, placed(7), 1, 0, 0, {}, {}}, kChannelOwnership);
   CHECK(messages_to<HandoverAsk>(h, 2).empty());
-  // After it, player 1's stun takes it back, though player 1 gave it up lately and player 2 stands by it.
-  h.run(5 * kSecond);
+  // After it, player 1's stun takes it back, though player 1 gave it up lately, player 2 stands by it and the 5 s
+  // cooldown of the other rules still runs (geno-polish-ai: a stun right after a change was lost).
+  h.run(kSecond);
   h.clear();
   h.receive(1, Damage{0, placed(7), 1, 0, 0, {}, {}}, kChannelOwnership);
   CHECK(messages_to<HandoverAsk>(h, 2) == std::vector<HandoverAsk>{{placed(7), 1, 1}});

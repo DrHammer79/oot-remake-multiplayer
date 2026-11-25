@@ -44,7 +44,19 @@ std::vector<std::uint64_t> Ridden(const std::vector<Lift>& lifts, const std::vec
 }
 
 bool IsStandSwitch(std::string_view name) {
-    return name.starts_with("Obj_") && name.find("StepSwitch_") != std::string_view::npos;
+    // The game spells it both ways: Obj_StepSwitch_A_01, but Obj_Stepswitch_A_03 (and its _Amos), the Water
+    // Temple's Obj_WaterTemple_Stepswitch_A_03 and Jabu's Obj_InsideJabu_Jabu_Stepswitch_A_02 (romfs Pack/Actor).
+    if (!name.starts_with("Obj_")) return false;
+    constexpr std::string_view kWord = "stepswitch_";
+    for (std::size_t at = 0; at + kWord.size() <= name.size(); ++at) {
+        bool same = true;
+        for (std::size_t i = 0; i < kWord.size() && same; ++i) {
+            const char c = name[at + i];
+            same = (c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c) == kWord[i];
+        }
+        if (same) return true;
+    }
+    return false;
 }
 
 std::vector<std::uint64_t> Stood(const std::vector<Lift>& switches, const std::vector<coop::protocol::Vec3>& others) {

@@ -3656,14 +3656,18 @@ TEST_CASE("objects: group rules for parts and bosses") {
 }
 
 TEST_CASE("ai-turns: TurnsAsEnemy lists the big melee kinds only, never a boss or part") {
+    // Every variant of these kinds the game has (romfs Pack/Actor, 2026-11-24).
     for (const char* name : {"Enemy_Moblin", "Enemy_Moblin_Club", "Enemy_Lizalfos", "Enemy_Dinolfos", "Enemy_Stalfos",
-                             "Enemy_Stalfos_Weak", "Enemy_LikeLike", "Enemy_IronKnuckle", "Enemy_IronKnuckle_Black"}) {
+                             "Enemy_Stalfos_Weak", "Enemy_Stalfos_ForChild", "Enemy_Stalfos_AlwaysRespawn",
+                             "Enemy_LikeLike", "Enemy_IronKnuckle_Black", "Enemy_IronKnuckle_White",
+                             "Enemy_IronKnuckle_Silver"}) {
         CAPTURE(name);
         CHECK(CoopObjects::TurnsAsEnemy(name));
         CHECK_FALSE(CoopObjects::IsBossOrPart(name));
     }
     for (const char* name : {"Enemy_Keese", "Enemy_Tektite", "Enemy_Poe_Amy", "Enemy_Dodongo", "Enemy_Ganondorf",
-                             "Enemy_Wolfos_White", "Enemy_Anubis", ""}) {
+                             "Enemy_Wolfos_White", "Enemy_Anubis", "Enemy_Stalfos_Haribote", "Enemy_Dinolfos_Haribote",
+                             "Enemy_MoblinClub_ShockWave", "Enemy_Moblin_Dictionary", "Enemy_IronKnuckle", ""}) {
         CAPTURE(name);
         CHECK_FALSE(CoopObjects::TurnsAsEnemy(name));
     }
@@ -5216,6 +5220,41 @@ TEST_CASE("objects: a plain enemy's copy stunned here sends a DAMAGE of 0 and ke
     wish.stun_plain = true;
     CHECK(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
     CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Down_Start"));
+    // geno-polish-ai: one stun rule on both sides. The owner's own Down is no plain stun: it is not put over ours;
+    // the owner's own stun is (both games show one stun).
+    wish.name = "Down_Start";
+    CHECK(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
+    wish.name = "StunA_St";
+    CHECK_FALSE(CoopObjects::CoversOwnReaction(wish, "Stun_Lp"));
+}
+
+// geno-polish-ai: the owner's plain enemy in its own Down (a life hit there, its own move) is in no stun, so our copy's
+// own stun still asks for it. Before, the owner's animation was read with the boss rule (Down counts) and kept it.
+TEST_CASE("objects: a plain enemy's copy stunned here asks while the owner's is in its own Down (ai-stuns)") {
+    const std::string lizalfos = "Enemy_Lizalfos";
+    Sync owner;
+    Seen e = Enemy(0x100, 0x11, 6, 0.0f, lizalfos);
+    e.animation = proto::Animation{"Down_Start", 10.0f, 1.0f};
+    Tick(owner, 0, {e});
+    const proto::ObjectId id = *owner.IdOf(0x100);
+    Own(owner, id, 1, 3);
+    auto samples = All<proto::ObjectSample>(Tick(owner, 10 * kMs, {e}));
+    REQUIRE(samples.size() == 1);
+
+    Sync copy;
+    Seen c = Enemy(0x200, 0x11, 6, 0.0f, lizalfos);
+    c.animation = proto::Animation{"Down_Start", 10.0f, 1.0f};
+    Tick(copy, 0, {c}, 2);
+    Own(copy, id, 1, 3);
+    proto::ObjectSample s = samples[0];
+    s.player_number = 1;
+    s.state.time = {1000 * kMs, 1};
+    copy.Receive(s);
+    Tick(copy, 1010 * kMs, {c}, 2);
+    c.animation = proto::Animation{"StunA_St", 0.0f, 1.0f};
+    const auto damage = All<proto::Damage>(Tick(copy, 1100 * kMs, {c}, 2));
+    REQUIRE(damage.size() == 1);
+    CHECK(damage[0].amount == 0);
 }
 
 // ai-stuns (NEXT33 lane run): another player's nut, shown here as a copy, bursts here too and stuns our copy. That
