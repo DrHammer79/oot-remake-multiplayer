@@ -407,12 +407,11 @@ class HookshotGamesTest(unittest.TestCase):
         self.assertEqual(calls, [({"B": self.g.procs["B"].pid}, "DISPLAY7", 30.0)])
 
     def test_run_stops_before_any_game_when_the_monitor_is_missing(self):
-        """main run: a --display no monitor has is an error (exit 2) before the server or any game starts."""
+        """main run: a PC with no monitor at all is an error (exit 2) before the server or any game starts."""
         import hookshot
         from unittest import mock
         with mock.patch.object(hs, "WINDOWS", True), \
-                mock.patch.object(hookshot.placement, "monitors",
-                                  lambda: [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 10, 10)}]), \
+                mock.patch.object(hookshot.placement, "monitors", lambda: []), \
                 mock.patch.object(hs.HookshotGames, "server_start", side_effect=AssertionError("a start happened")):
             steps = os.path.join(self.tmp, "s.steps.txt")
             with open(steps, "w") as f:

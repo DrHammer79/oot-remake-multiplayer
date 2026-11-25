@@ -1234,13 +1234,13 @@ class PackStartTest(unittest.TestCase):
 class WindowPlacementTest(unittest.TestCase):
     """hookshot.py run puts the game windows on the chosen monitor and never starts a game without one."""
 
-    def test_missing_monitor_stops_the_run_before_any_game_starts(self):
+    def test_no_monitor_at_all_stops_the_run_before_any_game_starts(self):
         import tempfile
         from unittest import mock
         started = []
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(hs, "WINDOWS", True), \
-                mock.patch.object(hs.placement, "monitors", lambda: [{"name": "\\\\.\\DISPLAY1", "work": (0, 0, 1, 1)}]), \
+                mock.patch.object(hs.placement, "monitors", lambda: []), \
                 mock.patch.object(hs.subprocess, "Popen", lambda *a, **k: started.append(a)):
             open(os.path.join(tmp, "s.txt"), "w").close()
             with self.assertRaises(SystemExit) as c:

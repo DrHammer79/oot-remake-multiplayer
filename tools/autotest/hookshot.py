@@ -1343,6 +1343,8 @@ def run(a):
             mon = placement.check_display(a.display)
         except placement.PlacementError as e:
             raise SystemExit("window placement: %s" % e)
+        if mon.get("note"):
+            say("window placement: %s" % mon["note"])
         say("windows go to %s (work area %s)" % (mon["name"], mon["work"]))
     started = {}
     scripts = {"A": a.script_a, "B": a.script_b}
