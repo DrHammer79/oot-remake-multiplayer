@@ -3489,7 +3489,10 @@ TEST_CASE("native boss: Twinrova hand-over, made ours mid-move with its own AI a
     a.changed = true;
     t.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, ""}}});
     CHECK(PutIns(t, g) == std::vector<std::int32_t>{121});
-    CHECK(t.OnActionVerb(kBsa, GameRequest(80, kShotNode), true, false, std::string{}));  // its AI goes on to Fly
+    // Its AI starts Fly (80): held (answered busy, as the wrap passes `answer`), its AI waits there.
+    std::uint64_t answer = addr::kActionTaken;
+    CHECK(t.OnActionVerb(kBsa, GameRequest(80, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionSlotBusy);
     t.Publish({Twinrova(Role::owner)});
     CHECK(PutIns(t, g).empty());  // nothing started over
     CHECK(t.Totals().owner_restarted == 0);
@@ -3506,6 +3509,32 @@ TEST_CASE("native boss: Twinrova hand-over, made ours mid-move with its own AI a
     CHECK(same.Totals().owner_restarted == 1);
     CHECK(PlanMadeOurs(false, std::nullopt, true, true, true, true) == MadeOurs::resume);
     CHECK(PlanMadeOurs(false, std::nullopt, true, true, true, false) == MadeOurs::restart_move);
+    // Its AI's last ask taken (not held, e.g. past the cap) and another move: goes on too.
+    Table taken;
+    taken.SetOn(true, true);
+    taken.Publish({Twinrova(Role::copy)});
+    (void)taken.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});
+    taken.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, ""}}});
+    CHECK(PutIns(taken, g) == std::vector<std::int32_t>{121});
+    CHECK(taken.OnActionVerb(kBsa, GameRequest(80, kShotNode), true, false, std::string{}));
+    taken.Publish({Twinrova(Role::owner)});
+    CHECK(PutIns(taken, g).empty());
+    CHECK(taken.Totals().made_ours_own_other == 1);
+    // Another boss (Phantom Ganon mid RushAttack, row 178): its own AI's last ask of another move restarts as before.
+    Table phantom;
+    phantom.SetOn(true, true);
+    phantom.Publish({Phantom(Role::copy)});
+    (void)phantom.OnActionVerb(kBsa, GameRequest(9, kNode), true, false);
+    BossAction rush = *ActionFromRequest(GameRequest(9, 0, true));
+    rush.changed = true;
+    phantom.Receive(kActor, BossBsa{1, 2, rush, {BossChange{1, rush}}});
+    CHECK(PutIns(phantom, g) == std::vector<std::int32_t>{9});
+    CHECK(phantom.OnActionVerb(kBsa, GameRequest(5, kNode), true, false, std::nullopt, nullptr, &answer));
+    CHECK(answer == addr::kActionTaken);
+    phantom.Publish({Phantom(Role::owner)});
+    CHECK(PutIns(phantom, g) == std::vector<std::int32_t>{9});
+    CHECK(phantom.Totals().owner_restarted == 1);
+    CHECK(phantom.Totals().made_ours_own_other == 0);
 }
 
 TEST_CASE("native boss: Twinrova hand-over, a copy's own start of another move than the owner's waits (NEXT49)") {

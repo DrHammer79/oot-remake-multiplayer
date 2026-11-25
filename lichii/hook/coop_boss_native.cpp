@@ -399,8 +399,19 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                 }
                 const bool own_ask_same =
                     e.put_action && e.own_asks.contains({e.put_action->slot, e.put_action->verb});
-                const auto last = e.put_action ? e.own_last_verb.find(e.put_action->slot) : e.own_last_verb.end();
-                const bool own_ask_other = last != e.own_last_verb.end() && last->second != e.put_action->verb;
+                // Twinrova only (HoldsOwnStarts): its own AI's last ask as a copy in the put move's slot, a start held
+                // now included (answered busy, its AI waits there), named another move.
+                std::optional<std::int32_t> own_other_verb;
+                if (e.put_action && HoldsOwnStarts(b.name)) {
+                    const auto last = e.own_last_verb.find(e.put_action->slot);
+                    if (e.start_hold && !e.start_hold->capped && e.start_hold->slot == e.put_action->slot &&
+                        e.start_hold->verb != e.put_action->verb) {
+                        own_other_verb = e.start_hold->verb;
+                    } else if (last != e.own_last_verb.end() && last->second != e.put_action->verb) {
+                        own_other_verb = last->second;
+                    }
+                }
+                const bool own_ask_other = own_other_verb.has_value();
                 const MadeOurs plan = PlanMadeOurs(turns_, b.attacking, actions_on_ && e.put_action.has_value(),
                                                    own_ask_same, e.own_node != 0, own_ask_other);
                 if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
@@ -409,7 +420,7 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                     // Twinrova hand-over (NEXT49 A 9588): its own AI had left the owner's move: it goes on.
                     ++counts_.made_ours_own_other;
                     Note(b.name + ": made ours mid-move (verb " + std::to_string(e.put_action->verb) +
-                         "), its own AI already in verb " + std::to_string(last->second) +
+                         "), its own AI already in verb " + std::to_string(*own_other_verb) +
                          ": its AI goes on, nothing started over");
                 } else if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
                     plan == MadeOurs::resume) {

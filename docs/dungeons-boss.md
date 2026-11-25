@@ -874,8 +874,9 @@ change:
    game's AI asks a start again after a busy answer (the next lane run shows it; if not, another lever).
 4. NEXT49 A 9588: made ours mid-attack while its own AI had already asked another move as a copy. Row 178 started
    the attack over as ours, sent it to every copy, and then our own AI's next ask took the boss on: the copies
-   played an attack the owner never made, with no shot. Now, when its own AI's last ask in that slot as a copy was
-   another move, its AI goes on and nothing is started over (`PlanMadeOurs`, `own_ask_other`). Log: `its own AI
+   played an attack the owner never made, with no shot. Now, on Twinrova, when its own AI's last ask in that slot as
+   a copy (or its own start held now, item 3) was another move, its AI goes on and nothing is started over
+   (`PlanMadeOurs`, `own_ask_other`). Other bosses restart as before (row 178). Log: `its own AI
    already in verb V: its AI goes on`.
 
 No protocol change. Solo play and owners are not touched. Not covered: a copy made

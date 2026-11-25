@@ -386,8 +386,8 @@ enum class MadeOurs : std::uint8_t {
 // far wall; his walk, started over, ended at once; his next roll, aimed at Link from there, went into the lava pit,
 // where no roll ever ends). Its own AI chooses again from what its body does instead (row 149), unless it asked that
 // same move itself (then it goes on).
-// Twinrova hand-over (tw-handover-3, NEXT49 A 9588): `own_ask_other`: its own AI's last ask in that slot as a copy
-// named another move (it had left the owner's move). Started over, the owner's move ran one frame here and went to
+// Twinrova hand-over (tw-handover-3, NEXT49 A 9588): `own_ask_other` (Twinrova only, HoldsOwnStarts): its own AI's
+// last ask in that slot as a copy, or its own start held now, named another move (it had left the owner's move). Started over, the owner's move ran one frame here and went to
 // every copy, then our own AI's next ask took the boss on: the copies played an attack the owner never made (no
 // shot). Its own AI goes on instead (resume): its next ask is the move it is in.
 constexpr MadeOurs PlanMadeOurs(bool turns, std::optional<bool> attacking, bool put_action, bool own_ask_same,
@@ -472,9 +472,9 @@ class Table {
 public:
     // Row 222: the frames a copy's own ask of the owner's move keeps the owner's repeats of that move out.
     static constexpr std::uint64_t kOwnMoveSteps = 30;
-    static constexpr int kBusyAsks = 3;
+    static constexpr int kBusyAsks = 3;  // row 211: an owner's move answered busy, asked again on this many frames
     // Twinrova hand-over: the frames a copy's own start of a move other than the owner's is answered busy, at most.
-    static constexpr std::uint64_t kOwnStartHoldSteps = 60;  // row 211: an owner's move answered busy, asked again on this many frames
+    static constexpr std::uint64_t kOwnStartHoldSteps = 60;
     // Switches (LICHII_COOP_BOSS_NATIVE, LICHII_COOP_BOSS_ACTIONS): off -> no
     // skip, no apply, nothing kept (the old gohma-sync path alone).
     void SetOn(bool brain, bool actions);
