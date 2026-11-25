@@ -327,7 +327,8 @@ private:
     void Note(std::string line);
     // The adult's lying pose this frame: play it held, or on to get up.
     std::optional<CoopPuppet::Call> StepPose(CoopPuppet::Guest& guest, std::uint64_t main_base);
-    std::optional<CoopPuppet::Call> Play(CoopPuppet::Guest& guest, float rate, std::uint64_t main_base);
+    std::optional<CoopPuppet::Call> Play(CoopPuppet::Guest& guest, float rate, std::uint64_t main_base,
+                                         std::string_view what = {});
 
     mutable std::mutex mutex_;
     Wanted want_;

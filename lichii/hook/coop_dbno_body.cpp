@@ -261,7 +261,8 @@ std::optional<CoopPuppet::Call> Crawl::Ask(CoopPuppet::Guest& guest, std::int32_
     return c;
 }
 
-std::optional<CoopPuppet::Call> Crawl::Play(CoopPuppet::Guest& guest, float rate, std::uint64_t main_base) {
+std::optional<CoopPuppet::Call> Crawl::Play(CoopPuppet::Guest& guest, float rate, std::uint64_t main_base,
+                                           std::string_view what) {
     // (the lock is held; the block exists) kLyingPose on our Link's slot 0
     // through the game's own play call, as the puppets play a command
     // (coop_puppet.cpp): +0 actor, +8 the name, +0x10 index 0, +0x14 rate,
@@ -269,7 +270,11 @@ std::optional<CoopPuppet::Call> Crawl::Play(CoopPuppet::Guest& guest, float rate
     // played again on at rate 1 to get up).
     std::array<char, addr::kTextSize> name{};
     static_assert(kLyingPose.size() < addr::kTextSize);
-    std::memcpy(name.data(), kLyingPose.data(), kLyingPose.size());
+    const std::string_view play = what.empty() ? kLyingPose : what;
+    if (play.size() >= name.size()) {
+        return std::nullopt;
+    }
+    std::memcpy(name.data(), play.data(), play.size());
     const std::uint64_t text = block_ + addr::kBlockText;
     if (!guest.Write(text, name.data(), name.size())) {
         return std::nullopt;
@@ -301,6 +306,21 @@ std::optional<CoopPuppet::Call> Crawl::StepPose(CoopPuppet::Guest& guest, std::u
         return std::nullopt;
     }
     pose_tried_ = true;
+    if (probe_variant_ != 0 && !want_.adult && want_.lying && want_.actor != 0) {
+        // PROBE child: slot 0 every 30 frames; variant 2 holds the crawl's own clip at rate 0.
+        const std::optional<AsSlot> cs = ReadSlot0(guest, want_.actor);
+        if (probe_frames_++ % 30 == 0) {
+            Note("PROBE child f " + std::to_string(probe_frames_ - 1) + " crawling " + std::to_string(crawling_) +
+                 " slot0 '" + (cs ? cs->name : std::string("?")) + "' frame " +
+                 (cs ? std::to_string(cs->frame) : std::string("?")) + " rate " +
+                 (cs ? std::to_string(cs->rate) : std::string("?")) + " our-slot verbs: " + probe_verbs_);
+            probe_verbs_.clear();
+        }
+        if (probe_variant_ == 2 && crawling_ && cs && !cs->name.empty() && cs->rate != kHeldRate) {
+            return Play(guest, kHeldRate, main_base, cs->name);
+        }
+        return std::nullopt;
+    }
     if (!want_.adult || want_.actor == 0 || (!want_.lying && releases_left_ == 0)) {
         riding_ = false;
         return std::nullopt;
