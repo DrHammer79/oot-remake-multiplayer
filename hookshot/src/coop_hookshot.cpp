@@ -2826,6 +2826,14 @@ COOP_HOOKSHOT_EXPORT int hos_coop_mouse(float fx, float fy, int event) {
         return CoopHookshot::Mouse(fx, fy, event) ? 1 : 0;
     });
 }
+// The game's menu mouse held off while co-op presses the menu's buttons for the player (coop_auto_press.h; Longshot
+// patch 0030's oot_menu.c asks each menu frame): 1 = held, the mouse neither points nor clicks.
+COOP_HOOKSHOT_EXPORT int hos_coop_menu_mouse_held(void) noexcept {
+    static CoopBoundary::Site site{"hos_coop_menu_mouse_held"};
+    return CoopExportGuard::Guard(site, static_cast<int>(0), [&]() -> int {
+        return g_on && CoopTitle::MenuMouseHeld() ? 1 : 0;
+    });
+}
 // Drawing over the picture (hos_coop_draw.h), on Hookshot's render thread.
 // The title menu (hos_coop_api.h, patch 0004): the game's title screen and the pad first.
 COOP_HOOKSHOT_EXPORT void hos_coop_title(void* ctx, uint64_t screen, int event) {
