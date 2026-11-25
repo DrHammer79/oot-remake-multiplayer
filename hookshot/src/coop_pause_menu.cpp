@@ -231,7 +231,8 @@ const std::vector<Command>& Commands() {
         {"/emote", "Lists the emotes."},
         {"/wave, /yes, /no, /look, /here, /wow",
          "Your Link plays a gesture on the other players' screens, as they see you (/emote wave is the same). /here "
-         "also calls out. It stops when you move. Nothing happens when you play alone."},
+         "also calls out, and every player reads the call in the chat. It stops when you move. Nothing happens "
+         "when you play alone."},
         {"/pvp", "Says whether players can hurt each other (PvP) in this game."},
         {"/pvp on, /pvp off", "The host only: lets players hurt each other, or stops it, for everyone."},
         // Down but not out (docs/play-online.md "Down but not out"; lichii/hook/coop_dbno.cpp Parse).
@@ -422,14 +423,21 @@ void Menu::HostRuleLines(std::vector<Line>& out, bool guest) const {
                                            "no items, enemies, doors, switches or saves are shared. PvP works as "
                                            "set below. Applies at your next Host."
                                          : "Off: the world is shared (the usual co-op). Applies at your next Host.")});
-    // Shared floor switches (coop_switch_stand_mode.h), the same way: on by default.
+    // Shared floor switches (coop_switch_stand_mode.h), the same way: on by default. Race mode shares no floor
+    // switch whatever this row says (coop_objects.cpp, the stander), so the help says so instead of "On": in a
+    // session by the session's race mode, else by the race mode chosen for the next Host.
+    const bool race_rules = live ? session_.race : options_.race;
+    const char* const kRaceSwitches = "Race mode is on, so floor switches are not shared whatever is set here. ";
     const std::string switches_now =
-        live ? std::string(session_.floor_switches ? "This game: On." : "This game: Off.") : std::string();
+        !live ? std::string()
+        : session_.race ? std::string("This game: Off (race mode).")
+        : std::string(session_.floor_switches ? "This game: On." : "This game: Off.");
     out.push_back({Toggle("Shared floor switches", options_.floor_switches), Act::kFloorSwitches,
                    guest ? std::string(kYourNextHost) + " " + switches_now
-                   : live && options_.floor_switches != session_.floor_switches
+                   : live && !session_.race && options_.floor_switches != session_.floor_switches
                        ? "Applies at your next Host: stop hosting, then start again. " + switches_now
-                       : std::string(options_.floor_switches
+                       : std::string(race_rules ? kRaceSwitches : "") +
+                         std::string(options_.floor_switches
                                          ? "On: another player standing on a floor switch holds it down in every "
                                            "game. Applies at your next Host."
                                          : "Off: a floor switch is held only by your own Link or a block. Applies at "

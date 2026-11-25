@@ -11,12 +11,21 @@
 namespace coop::host {
 class Session;
 }
+namespace coop::net {
+class Client;
+struct Event;
+}
 
 namespace CoopEmote {
 
 // Any thread (the chat box): true when `text` is an emote command, which is then done here and not sent as chat.
 // Takes the session's network lock. Alone in the session, or too soon after the last one: a notice, nothing sent.
 bool OnChat(std::string_view text, coop::host::Session& session);
+
+// The network thread, each event from the server with its client (CoopHook's OnSessionEvent): an EMOTE with
+// something to read (CoopEmote::HeardLine: a call) from another player becomes a chat notice with the sender's
+// name, in every game, whether or not the sender's puppet is in sight.
+void OnEvent(const coop::net::Event& event, coop::net::Client& client);
 
 // The chat notices since the last call (for the chat box).
 std::vector<std::string> TakeLines();

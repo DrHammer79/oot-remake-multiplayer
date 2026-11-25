@@ -41,6 +41,10 @@ struct Def {
     const char* sound = "";     // the game's Link sound started on the puppet, or "" for none
     std::uint32_t hold_ms = 0;  // how long the puppet is held on `command`
     const char* notice = "";    // our chat notice: "you wave"
+    // What the other players read in the chat, after the sender's name ("calls: over here"), or "" for none. Only
+    // a call has one: a gesture is seen on the puppet, a call must also reach a player who does not see it
+    // (another room or place, or looking away).
+    const char* heard = "";
 };
 
 std::span<const Def> Table();
@@ -65,6 +69,10 @@ std::optional<Command> Parse(std::string_view text);
 
 // "emotes: /wave, /yes, /no, /look, /here, /wow"
 std::string ListLine();
+
+// The chat notice the other players get for `def` from the player called `name`: "Saria calls: over here". ""
+// for an emote with nothing to read (Def::heard), and "Player <number>" stands in for an empty name.
+std::string HeardLine(const Def& def, std::string_view name, std::uint8_t number);
 
 // The sender's rule: one emote per kCooldownMs.
 class Limiter {

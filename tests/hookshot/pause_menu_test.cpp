@@ -2377,3 +2377,37 @@ TEST_CASE("pause tab: Settings: Shared floor switches, on unless turned off, kep
     CHECK(options.find("floor_switches") == std::string::npos);  // on: no line
     CHECK(CoopTitleMenu::Options::Read(coop, options).floor_switches);
 }
+
+TEST_CASE("pause tab: Settings: Shared floor switches says race mode shares none, chosen or in the session") {
+    Menu m;
+    m.Show(CoopTitleMenu::Options{});
+    m.Open(Page::kSettings);
+    SelectRow(m, "Shared floor switches");
+    CHECK(m.view().help.find("Race mode") == std::string::npos);
+    CHECK(m.view().help.rfind("On: another player", 0) == 0);
+    SelectRow(m, "Race mode");
+    m.Press(Input::kRight);   // race mode chosen for the next Host
+    REQUIRE(m.options().race);
+    SelectRow(m, "Shared floor switches");
+    CHECK(m.view().help.rfind("Race mode is on, so floor switches are not shared", 0) == 0);
+    SelectRow(m, "Race mode");
+    m.Press(Input::kLeft);
+    // A host in a race session whose own next choice is no race: the session's mode decides, and no "stop
+    // hosting, then start again" (that would not share them in this game's mode).
+    Session s = Hosting(2);
+    s.rules = true;
+    s.race = true;
+    s.floor_switches = true;
+    m.SetSession(s);
+    SelectRow(m, "Shared floor switches");
+    CHECK(m.view().help.rfind("Race mode is on, so floor switches are not shared", 0) == 0);
+    CHECK(m.view().help.find("stop hosting") == std::string::npos);
+    // A guest there reads the session's state.
+    Session g = Joined();
+    g.rules = true;
+    g.race = true;
+    g.floor_switches = true;
+    m.SetSession(g);
+    SelectRow(m, "Shared floor switches");
+    CHECK(m.view().help.find("This game: Off (race mode).") != std::string::npos);
+}

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <mutex>
 #include <utility>
+#include <variant>
 
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
@@ -76,6 +77,37 @@ bool OnChat(std::string_view text, coop::host::Session& session) {
         g.Line(std::move(line));
     }
     return true;
+}
+
+void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
+    if (event.kind != coop::net::EventKind::message) {
+        return;
+    }
+    const auto* emote = std::get_if<coop::protocol::Emote>(&event.message);
+    if (emote == nullptr) {
+        return;
+    }
+    const Def* def = ById(emote->id);
+    if (def == nullptr) {
+        return;  // an id this build does not know
+    }
+    std::string name;
+    for (const auto& p : client.players()) {
+        if (p.number == emote->player_number) {
+            if (p.self) {
+                return;  // our own: the sender has its own notice
+            }
+            name = p.nickname;
+            break;
+        }
+    }
+    std::string line = HeardLine(*def, name, emote->player_number);
+    if (line.empty()) {
+        return;
+    }
+    Glue& g = TheGlue();
+    std::lock_guard lock(g.mutex);
+    g.Line(std::move(line));
 }
 
 std::vector<std::string> TakeLines() {
