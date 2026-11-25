@@ -786,6 +786,26 @@ bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed
     if (e == nullptr) {
         return false;
     }
+    {  // PROBE (NEXT51, not for merge): Twinrova's asks, owner and copy, each change of (role, slot, verb, changed, node)
+        static std::uint64_t probe_lines = 0;
+        static std::string probe_last;
+        if (e->name == "Enemy_DungeonBoss_Twinrova" && probe_lines < 3000) {
+            std::uint64_t pn = 0;
+            std::memcpy(&pn, request.data() + addr::kReqNode, sizeof pn);
+            const std::string key = std::string(e->role == Role::owner ? "owner" : "copy") + (own ? " own" : "") +
+                                    " slot " + std::to_string(Get<std::int32_t>(request, addr::kReqSlot)) + " verb " +
+                                    std::to_string(Get<std::int32_t>(request, addr::kReqVerb)) + " changed " +
+                                    std::to_string(changed ? 1 : 0) + " node " + Hex(pn) +
+                                    (plug_name ? " plug '" + *plug_name + "'" : std::string());
+            if (key != probe_last) {
+                probe_last = key;
+                ++probe_lines;
+                Note("PROBE ask " + key + " step " + std::to_string(steps_) +
+                     (e->put_action ? " put verb " + std::to_string(e->put_action->verb) : std::string(" put -")) +
+                     " own_node " + Hex(e->own_node));
+            }
+        }
+    }
     if (e->role == Role::owner) {
         if (event_) {
             return false;  // our event's move, not the fight's

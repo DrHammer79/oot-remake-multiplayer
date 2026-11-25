@@ -3831,6 +3831,11 @@ private:
                                        "request (the owner's comes as a copy)", e.Name());
                     }
                 }
+                if (static int probe_bullets = 0; probe_bullets < 400 && std::string_view(e.Name()).starts_with("Twinrova_Bullet")) {
+                    ++probe_bullets;  // PROBE (NEXT51, not for merge): the bullet's create caller
+                    LOG_INFO(Core, "coop: PROBE create '{}' from main+{:#x} flags {:#x}", e.Name(),
+                             e.from >= main_ && main_ != 0 ? e.from - main_ : e.from, e.flags);
+                }
                 if (actor_event_lines_ < 40 && (e.flags & CoopActorEvents::kOwn) == 0) {
                     ++actor_event_lines_;
                     float place[3] = {};
