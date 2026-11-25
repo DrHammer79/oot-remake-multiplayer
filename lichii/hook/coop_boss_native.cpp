@@ -400,7 +400,14 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                     e.put_action && e.own_asks.contains({e.put_action->slot, e.put_action->verb});
                 const MadeOurs plan = PlanMadeOurs(turns_, b.attacking, actions_on_ && e.put_action.has_value(),
                                                    own_ask_same, e.own_node != 0);
-                if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
+                // lizalfos-freeze (fullpass seg 2, Spirit Temple): a plain enemy copy's own brain is skipped the same
+                // way (OnBrainVerb), so made ours it chooses again too; two Lizalfos made ours while their owner's
+                // Link was in an event stood still until hit. Its own asks are not learned as a copy, so it never
+                // resumes or restarts a move: it always chooses again.
+                if (e.role == Role::copy && b.role == Role::owner && e.wanted && b.plain && !OwnTime(e)) {
+                    e.rechoose = true;
+                    Note(b.name + ": a plain enemy made ours: its AI did not run its body as a copy: it chooses again");
+                } else if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
                     plan == MadeOurs::resume) {
                     // Boss turns, condition (1): handed to us between moves. Its body runs the owner's move (not an
                     // attack) and its own brain asked that same move, in the owner's brain verb: it goes on from here.
@@ -1435,7 +1442,7 @@ bool Table::StepOne(CoopPuppet::Guest& guest, std::uint64_t bsa, Entry& e, std::
                 e.restart_action.reset();  // (a block it cannot write: its AI chooses again instead)
                 e.rechoose = true;
             }
-            if (e.rechoose && !e.dying && !e.plain) {
+            if (e.rechoose && !e.dying) {  // (a plain enemy: only made ours sets it; the stall and fall checks are bosses')
                 // Row 149: the brain verb it is in, set again (force) through the game's own function. Our
                 // caller's call: the wrap keeps it as any change of ours, so every copy does the same.
                 CoopPuppet::Call c;
