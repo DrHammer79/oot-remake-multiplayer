@@ -943,10 +943,8 @@ TEST_CASE("testinput: menu host hands the hook the in-game host (row 260)") {
 
 TEST_CASE("testinput: menu paste hands the hook the clipboard's join (private-lobby-fix)") {
     std::string error;
-    CHECK_FALSE(Parse("menu paste now
-", error));
-    Runner r(Must("menu Paste
-"));
+    CHECK_FALSE(Parse("menu paste now\n", error));
+    Runner r(Must("menu Paste\n"));
     std::vector<std::string> log;
     r.Advance(0.0, std::nullopt, log);
     const auto requests = r.TakeRequests();
