@@ -295,7 +295,8 @@ void SearchStatus(void* ctx, const HosCoopApi* api, const Menu& menu) {
         ForgetStatus();   // (another screen made at its address: its panes are not the ones found)
         LOG_INFO(Core, "coop: hud: the player status screen {:#x} has another layout now: forgotten", had);
     }
-    if (g_status_screen.load() != 0 || menu.hud_screen == 0 || menu.screen_count == 0) {
+    // (the HUD's layout is read only while the HUD runs: issue 340)
+    if (g_status_screen.load() != 0 || !menu.HudRuns() || menu.screen_count == 0) {
         return;
     }
     const std::uint64_t hud_layout = Read64(menu.hud_screen + kScreenLayout);
@@ -393,16 +394,14 @@ void Frame(void* ctx, const HosCoopApi* api) {
         LOG_INFO(Core, "coop: map refresh: run at the HUD screen's update; its copy now {}", HudCopy(menu->hud_screen));
     }
     const std::uint64_t now = NowMs();
-    const auto anew = [&](CoopScreen::ScreenInstance& at, std::uint64_t screen) {
-        return screen != 0 && at.Next(screen, Read64(screen + kScreenLayout), true, now);
-    };
-    if (anew(g_hud_at, menu->hud_screen)) {
+    const std::uint64_t main = CoopRuntime::MainBase();
+    if (HudSearchDue(g_hud_at, *menu, main, now, Read64)) {
         const std::uint64_t old = g_searched_hud.exchange(menu->hud_screen);
         Forget(g_field, old), Forget(g_dungeon, old);
         for (Found* f : {&g_mini_dungeon, &g_mini_field, &g_mini_window, &g_mini_field_window, &g_mini_root}) Forget(*f, old);
         Search(ctx, api, menu->hud_screen, "HUD");
     }
-    if (anew(g_panel_at, menu->panel_screen)) {
+    if (PanelSearchDue(g_panel_at, *menu, main, now, Read64)) {
         const std::uint64_t old = g_searched_panel.exchange(menu->panel_screen);
         Forget(g_field, old), Forget(g_dungeon, old);
         Search(ctx, api, menu->panel_screen, "panel's");
