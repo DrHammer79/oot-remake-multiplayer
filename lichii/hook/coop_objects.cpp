@@ -4821,6 +4821,16 @@ private:
         }
         stamps_ = std::move(stamps);
         life_components_ = std::move(life_components);
+        // Row 270: the walk is whole: the addresses it no longer marks, and the Life components it no longer sees
+        // (but for one a kept give still waits on: StaleGiven), free their slots.
+        CoopDifficulty::TheKinds().Sweep();
+#ifdef COOP_HOOKSHOT
+        CoopActorEvents::TheLifeTable().Sweep([this](u64 component) {
+            return life_components_.contains(component) ||
+                   std::any_of(life_given_.begin(), life_given_.end(),
+                               [component](const LifeGiven& g) { return g.component == component; });
+        });
+#endif
         CoopDbno::NoteEnemiesNear(player && CoopDbno::AnyNear(*player, foes));
         sync_.SetPlayer(player);
         NoteOurLinkHit();  // row 230: a Redead's or Gibdo's scream on our Link (its Life step's hits)
@@ -5731,7 +5741,7 @@ private:
             if (!life_table_full_said_) {
                 life_table_full_said_ = true;
                 LOG_WARNING(Core, "coop: objects: no room to give a hit to the game's Life step ({:#x} '{}'): "
-                                  "until the next scene an enemy's is lost, anything else's life written",
+                                  "while its table is full an enemy's is lost, anything else's life written",
                             w.address, NameOf(w.address));
             }
 #endif
