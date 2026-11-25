@@ -1012,6 +1012,13 @@ TEST_CASE("hookshot: the game's menu screens reach the module, the mouse knows a
           std::string::npos);
     CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_game_pause_page(void) noexcept {") != std::string::npos);
     CHECK(module.find("return g_on ? CoopPauseTab::MousePage() : -2;") != std::string::npos);   // (off: no page)
+    // The menu mouse held off while co-op presses the game's buttons for the player (coop_auto_press.h): the menu's
+    // mouse frame asks after taking its sample (the hunk's context: its !got return), so the sample is dropped (no hover moves the focus, no click later).
+    CHECK(patch.find("+    coop_menu_mouse_held = (int (*)(void))(void *)GetProcAddress(m, \"hos_coop_menu_mouse_held\");") !=
+          std::string::npos);
+    CHECK(patch.find("+    if (hos_coop_menu_mouse_held_now()) {") != std::string::npos);
+    CHECK(module.find("COOP_HOOKSHOT_EXPORT int hos_coop_menu_mouse_held(void) noexcept {") != std::string::npos);
+    CHECK(module.find("return g_on && CoopTitle::MenuMouseHeld() ? 1 : 0;") != std::string::npos);
 }
 
 TEST_CASE("hookshot: the save-load wraps (patch 0024) are four rows in 0005's table, their header hookshot/src's") {
@@ -1459,6 +1466,11 @@ TEST_CASE("hookshot: a co-op build sends nothing to Longshot and is never a Long
     CHECK(patch.find("+    snprintf(out->url, sizeof out->url, \"%s\", HOS_COOP_CRASH_REPORT_PAGE);") != std::string::npos);
     CHECK(std::string(HOS_COOP_CRASH_REPORT_PAGE).rfind("https://github.com/daurosk/oot-remake-multiplayer/", 0) == 0);
     CHECK(patch.find("+                           \"your browser (this is a co-op build: not Longshot's to fix). %s\",") !=
+          std::string::npos);
+    // (a player, 2026-11-24, took Report manually for a sent report) Both endings say nothing was sent and how
+    // to send it: /bugreport with the kit's collect-logs zip.
+    CHECK(patch.find("+        opened ? \"Nothing has been sent: send it yourself, as the page") != std::string::npos);
+    CHECK(patch.find("+        opened ? \"\" : \". Nothing has been sent: send it yourself as that page says (/bugreport") !=
           std::string::npos);
 }
 
