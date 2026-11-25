@@ -2532,7 +2532,6 @@ TEST_CASE("player ride: type 385, samples channel, horse and offset, both ways")
   short_free.pop_back();
   CHECK(decode(short_free, back) != Error::none);
   bad = ride;
-  bad = ride;
   bad.player_number = 0;
   bad.horse.clear();
   CHECK(encode(Message{bad}, out) == Error::bad_value);  // riding nothing
@@ -2548,8 +2547,12 @@ TEST_CASE("player ride: type 385, samples channel, horse and offset, both ways")
   short_one.pop_back();
   CHECK(decode(short_one, back) != Error::none);
   Bytes flag_two = b;
-  flag_two[4 + 1] = 0x03;  // flags byte
+  flag_two[4 + 1] = 0x03;  // flags byte: both bits, refused as a bad value before any place is looked for
   CHECK(decode(flag_two, back) == Error::bad_value);
+  flag_two[4 + 1] = 0x04;  // a bit nobody knows
+  CHECK(decode(flag_two, back) == Error::bad_value);
+  flag_two[4 + 1] = kRideFree;  // free, but the place was never sent
+  CHECK(decode(flag_two, back) != Error::none);
 }
 
 TEST_CASE("platform clock: type 400, object samples channel, checked keys and floats (platforms-b)") {

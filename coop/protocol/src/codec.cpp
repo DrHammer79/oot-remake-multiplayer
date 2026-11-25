@@ -1157,6 +1157,12 @@ Error decode_body(Reader& r, PlayerRide& m) {
   m = PlayerRide{};
   COOP_READ(r.u8(m.player_number));
   COOP_READ(r.u8(m.flags));
+  // The flags say what follows (a place with kRideFree), so a bad flags byte is refused as a bad value
+  // here, before it can make the reader run past the end looking for a place that was never sent.
+  if ((m.flags & ~(kRideRiding | kRideFree)) != 0 ||
+      (m.flags & (kRideRiding | kRideFree)) == (kRideRiding | kRideFree)) {
+    return Error::bad_value;
+  }
   COOP_TRY(r.str(m.horse, kMaxRideHorseChars));
   for (float& f : m.offset) COOP_READ(r.f32(f));
   for (float& f : m.rotation) COOP_READ(r.f32(f));
