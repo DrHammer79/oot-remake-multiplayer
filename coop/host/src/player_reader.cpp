@@ -554,6 +554,7 @@ std::optional<PlayerReading> PlayerReader::read() {
   PlayerReading reading;
   reading.position = *position;
   reading.rotation = read_rotation();
+  reading.link_actor = find_player_actor().has_value();
   reading.age = read_age();
   reading.scene = read_scene();
   {

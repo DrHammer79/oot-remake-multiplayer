@@ -103,6 +103,20 @@ TEST_CASE("host reader: position falls back to the actor when the GameUI copy is
   CHECK(reader.read_position() == Vec3{5.0f, 6.0f, 7.0f});
 }
 
+TEST_CASE("host reader: the GameUI copy with no Link actor is read, and says no live Link (title-puppet)") {
+  // After a quit to the title the game destroys Link's actor and the GameUI keeps its copy of the pose, valid bit set.
+  FakeMemory m;
+  const Layout l = make_game(m);
+  PlayerReader reader(m);
+  REQUIRE(reader.read());
+  CHECK(reader.read()->link_actor);
+  m.put_u32(l.actor1 + addr::kActorState, 7);
+  const auto r = reader.read();
+  REQUIRE(r);
+  CHECK(r->position == Vec3{1.0f, 2.0f, 3.0f});
+  CHECK_FALSE(r->link_actor);
+}
+
 TEST_CASE("host reader: the link choice and the id test") {
   FakeMemory m;
   const Layout l = make_game(m);
