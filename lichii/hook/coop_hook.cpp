@@ -1262,7 +1262,8 @@ public:
             lent_keys_.forget();  // dungeon-sync-b: the save has its own key counts
             start_source_.Reset();  // deku-sync-fix: what the game asked before the load is not ours now
             story_source_.Reset();
-            coop::host::map_drop_log().note("save load seen (" + std::to_string(report.save_load_flags) + " flags back)");
+            coop::host::map_drop_log().game_reset("save load seen (" + std::to_string(report.save_load_flags) +
+                                                  " flags back)");
         }
         // deku-dungeon-2 (DUNGEON_EVENT, issues 176 and 196): a gimmick event
         // our game starts goes out at once, and another player's start is
@@ -3747,7 +3748,7 @@ void KeepMapsAlone(EmulatorMemory& memory, bool in_play, const std::optional<std
     coop::host::GameFlagStore flags(memory);
     const coop::host::MapDropBecause because("the solo keeper (minimap-b)");
     const auto restored = keeper.frame(flags, in_play, coop::host::view_of(scene));
-    if (keeper.take_save_load()) coop::host::map_drop_log().note("save load (no scene for a while: the title)");
+    if (keeper.take_save_load()) coop::host::map_drop_log().game_reset("save load (no scene for a while: the title)");
     if (keeper.take_hud_refresh() && StartMapRefresh()) CoopMapRefresh::TheRefresher().WantNow(SteadyMs());  // rows 140, 183
     for (const auto key : restored) {
         const auto* item = coop::host::find_item(key.hash);
@@ -3770,6 +3771,10 @@ void WatchMapDrops(EmulatorMemory& memory, bool in_play, const std::optional<std
     for (const auto& line : coop::host::map_drop_log().frame(
              flags, coop::host::view_of(scene), in_play, link)) {
         LOG_WARNING(Core, "{}", line);
+    }
+    // Row 269: the game's own clear at a save load or the title is no drop in play: information.
+    for (const auto& line : coop::host::map_drop_log().take_info()) {
+        LOG_INFO(Core, "{}", line);
     }
 }
 
