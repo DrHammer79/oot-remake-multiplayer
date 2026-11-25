@@ -110,6 +110,7 @@ private:
         bool awake = false;          // ours: awake when last read
         std::uint32_t seq = 0;       // ours: its wake's seq; a copy: the owner shot it shows (0: none)
         coop::protocol::Vec3 position{};
+        std::uint64_t actor = 0;     // its actor when first seen; another there later: a freed request, forgotten
     };
     struct Entry {
         Member member;
@@ -123,6 +124,8 @@ private:
     void DropGame();  // (mutex_ held)
     void StepOwner(CoopPuppet::Guest& guest, Entry& e, std::uint64_t now_us);
     void StepCopy(CoopPuppet::Guest& guest, Entry& e);
+    std::uint64_t Live(CoopPuppet::Guest& guest, Bullet& b, std::uint32_t state);
+    void Forget();
 
     mutable std::mutex mutex_;
     bool on_ = false;

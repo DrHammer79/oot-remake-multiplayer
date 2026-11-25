@@ -1849,8 +1849,8 @@ proto::ObjectState Sync::StateOf(Object& o, std::uint64_t now_us) {
     if (o.orders) {
         state.orders = o.orders;  // row 222: its battle manager's orders
     }
-    if (o.shots && !o.shots->recent.empty()) {
-        state.shots = o.shots;  // Twinrova hand-over: its shots (component 29)
+    if (o.shots) {
+        state.shots = o.shots;  // Twinrova hand-over: its shots (component 29; an empty list for a while after)
     }
     if (o.rotation) {
         state.rotation = QuatOf(*o.rotation);
@@ -4354,6 +4354,8 @@ void Sync::Apply(std::uint8_t self, std::uint64_t now_us, std::vector<proto::Mes
             }
             if (sample->state.shots) {
                 o->shots_in = sample->state.shots;  // Twinrova hand-over: the owner's shots
+            } else if (o->shots_in) {
+                o->shots_in->recent.clear();  // none awake there now (its empty tail missed)
             }
             if (sample->state.position && Finite(*sample->state.position)) {
                 const std::uint64_t t = sample->state.time.server_time_us;

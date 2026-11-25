@@ -897,7 +897,9 @@ ends. In the fight there is no create and no call of the shoot code main+0xc16cf
 bullets were the twelve made in the intro, by address). The game's own wake is a compare-and-swap of 3 to 4 in the
 actor manager (main+0x14acc).
 
-- Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST).
+- Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST). They are forgotten when her
+  room goes, and one whose request later names another actor than the first seen (freed and used again) is forgotten
+  and never written through.
 - The owner's game reads its bullets every frame. A wake (3 to 4) is one shot. The bullets awake now, each with its
   seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 29 `shots`, no protocol bump); an empty
   list is sent for 500 ms after the last one ends.
@@ -905,8 +907,10 @@ actor manager (main+0x14acc).
   Every frame after that it puts the bullet on the owner's newest place, so it moves where the owner's does, and its
   own collision still hits the copy's Link. When the owner's bullet ends, the copy's is put back to 3. One that hits
   the copy's Link first ends there by itself.
-- Once the owner's first sample has come, a wake by the copy's own AI is put back to 3 on the next frame, so each
-  owner shot is one bullet in every game. Before that (a new copy, an older owner) the copy's own wakes stand.
+- Once the owner's first sample has come, a wake by the copy's own AI is put back to 3 on the next frame (before
+  the owner's new shots are woken, so a bullet it took that frame is free for them), so each owner shot is one bullet
+  in every game. An owner sample with no `shots` counts as an empty list, so a copy that missed the empty tail does
+  not keep a bullet hanging. Before that (a new copy, an older owner) the copy's own wakes stand.
 - A hand-over starts it again: bullets in flight finish on their own and are no one's shot; the new owner counts from
   its next wake, and a game made a copy waits for the new owner's first sample.
 

@@ -22,13 +22,6 @@ std::uint64_t ActorOf(CoopPuppet::Guest& guest, std::uint64_t handle) {
     return Get(guest, handle, request) && Get(guest, request + addr::kRequestActor, actor) ? actor : 0;
 }
 
-// The bullet's actor when it is in `state` (0: not, or gone).
-std::uint64_t ActorIn(CoopPuppet::Guest& guest, std::uint64_t handle, std::uint32_t state) {
-    const std::uint64_t actor = ActorOf(guest, handle);
-    std::uint32_t now = 0;
-    return actor != 0 && Get(guest, actor + addr::kActorState, now) && now == state ? actor : 0;
-}
-
 void Put(CoopPuppet::Guest& guest, std::uint64_t actor, std::uint32_t state) {
     guest.Write(actor + addr::kActorState, &state, sizeof state);
 }
@@ -62,6 +55,30 @@ void Table::Note(std::string text) {
     if (notes_.size() < 64) {
         notes_.push_back(std::move(text));
     }
+}
+
+// The bullet's actor when it is in `state`; 0 when not, or gone. A request that now names another actor than the
+// one first seen was freed with its room: the bullet is forgotten (handle 0) and never written through again.
+std::uint64_t Table::Live(CoopPuppet::Guest& guest, Bullet& b, std::uint32_t state) {
+    if (b.handle == 0) {
+        return 0;
+    }
+    const std::uint64_t actor = ActorOf(guest, b.handle);
+    if (actor == 0) {
+        return 0;
+    }
+    if (b.actor == 0) {
+        b.actor = actor;
+    } else if (actor != b.actor) {
+        b.handle = 0;
+        return 0;
+    }
+    std::uint32_t now = 0;
+    return Get(guest, actor + addr::kActorState, now) && now == state ? actor : 0;
+}
+
+void Table::Forget() {
+    std::erase_if(bullets_, [](const Bullet& b) { return b.handle == 0; });
 }
 
 void Table::KeepBullet(std::uint64_t handle, std::string_view name) {
@@ -106,6 +123,9 @@ void Table::Publish(std::span<const Member> members) {
         }
         e.member = m;
         next.emplace(m.actor, std::move(e));
+    }
+    if (next.empty() && !entries_.empty()) {
+        bullets_.clear();  // her room is gone: its bullets with it (a new room makes its own)
     }
     entries_ = std::move(next);
 }
@@ -155,7 +175,7 @@ void Table::Receive(std::uint64_t actor, const BossShots& shots) {
 
 void Table::StepOwner(CoopPuppet::Guest& guest, Entry& e, std::uint64_t now_us) {
     for (Bullet& b : bullets_) {
-        const std::uint64_t actor = ActorIn(guest, b.handle, addr::kStateAwake);
+        const std::uint64_t actor = Live(guest, b, addr::kStateAwake);
         if (actor != 0) {
             coop::protocol::Vec3 p{};
             if (guest.Read(actor + addr::kActorPosition, p.data(), sizeof p) && Finite(p)) {
@@ -186,7 +206,7 @@ void Table::StepCopy(CoopPuppet::Guest& guest, Entry& e) {
         if (b.seq == 0) {
             continue;
         }
-        const std::uint64_t actor = ActorIn(guest, b.handle, addr::kStateAwake);
+        const std::uint64_t actor = Live(guest, b, addr::kStateAwake);
         if (const BossShot* s = owner_has(b.seq)) {
             if (actor != 0) {
                 guest.Write(actor + addr::kActorPosition, s->position.data(), sizeof s->position);
@@ -198,18 +218,32 @@ void Table::StepCopy(CoopPuppet::Guest& guest, Entry& e) {
         }
         b.seq = 0;
     }
-    // The owner's new shots: a kept bullet of the same name woken on its place.
+    // Our own AI's wakes: put back once the owner's shots come, before the owner's are woken, so a bullet our AI
+    // took in this frame is free for the owner's shot.
+    if (e.owner_came) {
+        for (Bullet& b : bullets_) {
+            if (b.seq != 0) {
+                continue;
+            }
+            if (const std::uint64_t actor = Live(guest, b, addr::kStateAwake)) {
+                Put(guest, actor, addr::kStateKept);
+                ++counts_.copy_stopped;
+            }
+        }
+    }
+    // The owner's new shots: a kept bullet of the same name woken on its place (the newest room's first).
     for (const BossShot& s : e.owner.recent) {
         if (s.seq <= e.through) {
             continue;
         }
         e.through = s.seq;
         bool woken = false;
-        for (Bullet& b : bullets_) {
+        for (auto it = bullets_.rbegin(); it != bullets_.rend(); ++it) {
+            Bullet& b = *it;
             if (b.seq != 0 || b.name != s.name) {
                 continue;
             }
-            const std::uint64_t actor = ActorIn(guest, b.handle, addr::kStateKept);
+            const std::uint64_t actor = Live(guest, b, addr::kStateKept);
             if (actor == 0) {
                 continue;
             }
@@ -224,19 +258,6 @@ void Table::StepCopy(CoopPuppet::Guest& guest, Entry& e) {
             ++counts_.dropped;
             Note(e.member.name + ": shots: no kept " + s.name + " free for the owner's shot " +
                  std::to_string(s.seq));
-        }
-    }
-    // Our own AI's wakes: put back once the owner's shots come.
-    if (!e.owner_came) {
-        return;
-    }
-    for (const Bullet& b : bullets_) {
-        if (b.seq != 0) {
-            continue;
-        }
-        if (const std::uint64_t actor = ActorIn(guest, b.handle, addr::kStateAwake)) {
-            Put(guest, actor, addr::kStateKept);
-            ++counts_.copy_stopped;
         }
     }
 }
@@ -260,6 +281,7 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool, std:
     } else {
         StepCopy(guest, e);
     }
+    Forget();
     return std::nullopt;
 }
 
