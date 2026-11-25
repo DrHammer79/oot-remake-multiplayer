@@ -715,6 +715,32 @@ TEST_CASE("dbno reviver: beside a downed player, holding sends five times a seco
     CHECK_FALSE(r.Frame(now, true, false, {0, 0, 0}, scene, fallen).send);
 }
 
+TEST_CASE("dbno reviver: A held on past the revive stays ours until it is let go (fullpass-1-2: the door opened)") {
+    CoopDbno::Reviver r;
+    const std::optional<std::string> scene = "spot00";
+    const std::vector<CoopDbno::Fallen> fallen{{2, "spot00", {1, 0, 0}}};
+    std::uint64_t now = kS;
+    for (int i = 0; i < 10; ++i) {
+        now += kFrame;
+        r.Frame(now, true, true, {0, 0, 0}, scene, fallen);
+    }
+    CHECK(r.TakesButton());
+    // The teammate is up: nobody is in reach, A is still held. The game must not take it as a new press.
+    now += kFrame;
+    r.Frame(now, true, true, {0, 0, 0}, scene, {});
+    CHECK(r.TakesButton());
+    now += kFrame;
+    r.Frame(now, true, true, {0, 0, 0}, scene, {});
+    CHECK(r.TakesButton());
+    // Let go: A is the game's again.
+    now += kFrame;
+    r.Frame(now, true, false, {0, 0, 0}, scene, {});
+    CHECK_FALSE(r.TakesButton());
+    now += kFrame;
+    r.Frame(now, true, true, {0, 0, 0}, scene, {});
+    CHECK_FALSE(r.TakesButton());
+}
+
 TEST_CASE("dbno reviver: nobody in reach, another scene, or not able: no target and A is the game's") {
     CoopDbno::Reviver r;
     const std::optional<std::string> scene = "spot00";

@@ -593,6 +593,7 @@ std::optional<proto::DbnoThreat> ThreatTeller::Frame(std::uint64_t now_us, bool 
 void Reviver::Reset() {
     target_ = 0;
     holding_ = false;
+    kept_ = false;
     sent_us_ = 0;
 }
 
@@ -622,6 +623,7 @@ Reviver::Out Reviver::Frame(std::uint64_t now_us, bool able, bool button, const 
         }
     }
 
+    kept_ = able && button && (kept_ || target_ != 0 || pick != 0);
     Out out;
     if (holding_ && (pick != target_ || !button)) {
         // Let go of the one we held, before anything else.
