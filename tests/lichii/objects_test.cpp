@@ -8339,6 +8339,36 @@ TEST_CASE("row 211: a boss's attack goes on while a rally ball of its own flies 
     }
 }
 
+TEST_CASE("rows 177/211: a rally ball our Link sent back is answered by its maker's own AI: which bosses") {
+    // Proof run 20261123-083911: the copy's own 'Parry02_Ready' was played over by the owner's 'Parry', 0 own stuns.
+    // The walk hands the makers of the balls our Link sent back; each boss in Seen that made one gets its own time
+    // (NoteOwnHit, which lets only a copy run its own), once each.
+    using CoopObjects::RallyMakers;
+    using CoopObjects::RallyReturnedTo;
+    const Seen dorf = Enemy(0x100, 0x11, 70, 0.0f, "Enemy_DungeonBoss_Ganondorf");
+    const Seen phantom = Enemy(0x200, 0x12, 70, 0.0f, "Enemy_DungeonBoss_PhantomGanon");
+    const Seen twinrova = Enemy(0x300, 0x13, 70, 0.0f, "Enemy_DungeonBoss_Twinrova");
+    const Seen baba = Enemy(0x400, 0x14, 4, 0.0f, "Enemy_DekuBaba");
+    const std::vector<Seen> seen{dorf, phantom, twinrova, baba, dorf};
+    // Nothing sent back: nobody.
+    CHECK(RallyReturnedTo(seen, RallyMakers({})).empty());
+    // His light ball and his charge ball: Ganondorf (and Phantom Ganon, the ball's other maker in the table), once.
+    for (const char* ball : {"DungeonBossGanondrof_Bullet_LightBall", "DungeonBossGanondrof_Bullet_ChargeLightBall"}) {
+        CAPTURE(ball);
+        CHECK(RallyReturnedTo(seen, RallyMakers({ball, ball})) == std::vector<std::uint64_t>{0x100, 0x200});
+        CHECK(RallyReturnedTo({dorf}, RallyMakers({ball})) == std::vector<std::uint64_t>{0x100});
+    }
+    // Phantom Ganon's own ball (stage 2): only him.
+    CHECK(RallyReturnedTo(seen, RallyMakers({"DungeonBossPhantomGanon_Bullet_LightBall"})) ==
+          std::vector<std::uint64_t>{0x200});
+    // A shot nobody rallies is no rally ball, so never handed in: no own time from it.
+    CHECK(RallyReturnedTo(seen, RallyMakers({"PhantomGanon_Bullet_Thunder", "Octorok_Bullet"})).empty());
+    // An unread actor (address 0) is skipped.
+    CHECK(RallyReturnedTo({Enemy(0, 0x11, 70, 0.0f, "Enemy_DungeonBoss_Ganondorf")},
+                          RallyMakers({"DungeonBossGanondrof_Bullet_LightBall"}))
+              .empty());
+}
+
 TEST_CASE("row 211: the sync holds a boss's attack from the walk's rally balls (no shared object: never in Seen)") {
     // Proof run 20261123-045939: the ball is no shared object, so RallyMakers over Seen never saw it and the hold
     // never came on. The walk hands the makers in (SetRallyMakers) before each Tick.

@@ -66,6 +66,7 @@
 #include "coop_boss_orders.h"
 #include "coop_difficulty.h"
 #include "coop_puppet.h"
+#include "coop_shot_reflect.h"
 #include "coop_pvp.h"
 #include "coop_pvp_game.h"
 #include "coop_pvp_native.h"
@@ -583,6 +584,14 @@ public:
         return p;
     }
 
+    bool Read(u64 address, void* out, std::size_t size) {
+        if (address < 0x1000 || !memory_.IsValidVirtualAddressRange(address, size)) {
+            return false;
+        }
+        memory_.ReadBlockUnsafe(address, out, size);
+        return true;
+    }
+
     std::string Name(u64 actor) {
         const auto p = Ptr(actor + kActorName);
         if (!p) {
@@ -599,6 +608,39 @@ public:
 private:
     Core::Memory::Memory& memory_;
 };
+
+// The walk's reads as a CoopPuppet::Guest, for CoopShotReflect's hit-list reading (no writes).
+class ReaderGuest final : public CoopPuppet::Guest {
+public:
+    explicit ReaderGuest(Reader& r) : r_(r) {}
+    bool Read(std::uint64_t address, void* out, std::size_t size) override { return r_.Read(address, out, size); }
+    bool Write(std::uint64_t, const void*, std::size_t) override { return false; }
+
+private:
+    Reader& r_;
+};
+
+// Rows 177/211 (row-177-ball): our own Link sent this rally ball back in our game: the game's own hit list of the
+// ball holds his sword's reflect-kind hit (CoopShotReflect::OurHit, the hit the maker's sensor query reads), or the
+// ball's Shootable state is Reflected (it flies back to its maker). The hit list holds a hit only for a moment and
+// the walk runs every two frames, so the state is read too.
+bool RallyBallSentBackByUs(Reader& r, u64 ball, u64 link) {
+    if (link == 0) {
+        return false;
+    }
+    namespace sr = CoopShotReflect::addr;
+    if (const auto table = r.Ptr(ball + kActorComponents)) {
+        if (const auto shootable = r.Ptr(*table + sr::kComponentShootable)) {
+            const auto valid = r.Get<std::uint8_t>(*shootable + sr::kShootableValid);
+            const auto state = r.Get<std::int32_t>(*shootable + sr::kShootableState);
+            if (valid && (*valid & 1) != 0 && state && *state == sr::kStateReflected) {
+                return true;
+            }
+        }
+    }
+    ReaderGuest guest(r);
+    return CoopShotReflect::OurHit(guest, ball, link, CoopShotReflect::Way::melee);
+}
 
 // Native boss sync: main's base for the boss caller (set by the walk).
 std::atomic<std::uint64_t>& TheBossMain() {
@@ -4451,6 +4493,8 @@ private:
         }
         const u64 now_ms = SteadyNowMs();
         std::vector<std::string> rally_balls;  // row 211: the boss balls a sword sends back, alive in this walk
+        std::vector<std::string> rally_returned;  // rows 177/211: those our own Link sent back (RallyBallSentBackByUs)
+        std::vector<u64> rally_returned_at;       // (their actors, for the log)
         const u64 world_frame = CoopWorldSnapshot::TheStore().Enabled() ? CoopWorldSnapshot::TheStore().Frame() : 0;
         for (const u64 a : actors) {
             // Row 172 (run 053934): a scene change can put a new actor at an address an old one held without a
@@ -4494,6 +4538,10 @@ private:
             member_log(a, known.first);  // G1: the game's own event member test, for the log
             if (CoopEnemyShots::IsRallyBall(known.first)) {
                 rally_balls.push_back(known.first);  // (no shared object: never in Seen)
+                if (RallyBallSentBackByUs(r, a, TheLinkActor().load())) {
+                    rally_returned.push_back(known.first);
+                    rally_returned_at.push_back(a);
+                }
             }
             // Difficulty: a made actor that may be an extra the director has not bound yet waits for it.
             const bool extra_unbound = (known.second == 0 || known.second == ~u64{0}) &&
@@ -4891,6 +4939,20 @@ private:
             }
         }
         sync_.SetRallyMakers(RallyMakers(rally_balls));  // row 211: for this walk's Tick (AttackWithRally)
+        // Rows 177/211: a boss ball our Link sent back is answered by its maker's own AI here (RallyReturnedTo).
+        // NoteOwnHit lets only a copy run its own (an owner's own AI runs anyway); each walk the ball flies back
+        // again keeps it so, and its knockdown is then its own stun (NoteOwnStun), whose DAMAGE 0 hands him to us.
+        for (const u64 boss : RallyReturnedTo(out, RallyMakers(rally_returned))) {
+            CoopBossNative::TheTable().NoteOwnHit(boss, true);
+        }
+        for (std::size_t i = 0; i < rally_returned_at.size(); ++i) {
+            if (std::find(rally_said_.begin(), rally_said_.end(), rally_returned_at[i]) == rally_said_.end()) {
+                LOG_INFO(Core, "coop: objects: {} {:#x} sent back by our Link: its maker answers it with its own AI "
+                               "here (rows 177/211)",
+                         rally_returned[i], rally_returned_at[i]);
+            }
+        }
+        rally_said_ = std::move(rally_returned_at);
         if (debug_) {  // research: the field grass that is no actor (world.md)
             for (const std::string& line : foliage_.Look(
                      [&r](u64 address) { return r.Get<u64>(address); }, main_, player)) {
@@ -6729,6 +6791,7 @@ private:
     // Difficulty: this scene visit's extra enemies (where from the game's placement data).
     CoopDifficulty::Extras extras_{CoopDifficulty::AreaOf, SpecialForExtras};
     CoopDifficulty::Horde horde_;    // difficulty: the night horde we made beside our own rolls
+    std::vector<u64> rally_said_;    // rows 177/211: the rally balls sent back by our Link in the last walk (said once)
     u64 share_now_us_ = 0;  // this Share's server time (WriteLife)
     // The scene the save's Gold Skulltula keys were fed for (issue 89, Share's
     // key scan): a scene's actors are made once, so one scan a scene is enough.
