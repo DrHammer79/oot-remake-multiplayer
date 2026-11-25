@@ -399,9 +399,19 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                 }
                 const bool own_ask_same =
                     e.put_action && e.own_asks.contains({e.put_action->slot, e.put_action->verb});
+                const auto last = e.put_action ? e.own_last_verb.find(e.put_action->slot) : e.own_last_verb.end();
+                const bool own_ask_other = last != e.own_last_verb.end() && last->second != e.put_action->verb;
                 const MadeOurs plan = PlanMadeOurs(turns_, b.attacking, actions_on_ && e.put_action.has_value(),
-                                                   own_ask_same, e.own_node != 0);
+                                                   own_ask_same, e.own_node != 0, own_ask_other);
                 if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
+                    plan == MadeOurs::resume && own_ask_other &&
+                    !(turns_ && b.attacking.has_value() && !*b.attacking)) {
+                    // Twinrova hand-over (NEXT49 A 9588): its own AI had left the owner's move: it goes on.
+                    ++counts_.made_ours_own_other;
+                    Note(b.name + ": made ours mid-move (verb " + std::to_string(e.put_action->verb) +
+                         "), its own AI already in verb " + std::to_string(last->second) +
+                         ": its AI goes on, nothing started over");
+                } else if (e.role == Role::copy && b.role == Role::owner && e.wanted && !b.plain && !OwnTime(e) &&
                     plan == MadeOurs::resume) {
                     // Boss turns, condition (1): handed to us between moves. Its body runs the owner's move (not an
                     // attack) and its own brain asked that same move, in the owner's brain verb: it goes on from here.
@@ -434,6 +444,8 @@ void Table::Publish(const std::vector<Boss>& bosses) {
                         Note(b.name + ": its AI did not run its body as a copy: it chooses again");
                     }
                 }
+                EndStartHold(e, "role changed");
+                e.own_last_verb.clear();
                 e.hold_since = steps_;
                 e.hold_asks = 0;
                 e.hold_rechoices = 0;
@@ -750,7 +762,11 @@ bool Table::OnBrainVerb(std::uint64_t bsa, std::int32_t verb, bool force, bool o
 }
 
 bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed, bool own,
-                         std::optional<std::string> plug_name, std::optional<Request>* renamed) {
+                         std::optional<std::string> plug_name, std::optional<Request>* renamed,
+                         std::uint64_t* answer) {
+    if (answer != nullptr) {
+        *answer = addr::kActionTaken;
+    }
     std::lock_guard lock(mutex_);  // (waits: see the header, "The wraps")
     if (!actions_on_) {
         return false;
@@ -843,9 +859,57 @@ bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed
         }
         if (runs) {
             e->own_moves[ask_slot] = {ask_verb, steps_};
+            e->own_last_verb[ask_slot] = ask_verb;
             ++counts_.copy_own_move;
             return false;
         }
+    }
+    if (changed && answer != nullptr && node != 0 && HoldsOwnStarts(e->name) && e->put_action &&
+        e->put_action->slot == ask_slot) {
+        // Twinrova hand-over (see the header, `answer`): its own start of another move than the owner's waits.
+        auto& h = e->start_hold;
+        if (e->put_action->verb == ask_verb) {
+            if (h && h->slot == ask_slot && h->verb == ask_verb) {
+                ++counts_.own_start_holds_met;
+                EndStartHold(*e, "the owner's move reached it, taken");
+            }
+        } else {
+            if (!h || h->slot != ask_slot || h->verb != ask_verb) {
+                EndStartHold(*e, "its AI asked another start");
+                h = Entry::StartHold{ask_slot, ask_verb, steps_, 0, false};
+                ++counts_.own_starts_held;
+                if (hold_notes_ < kMaxStreamNotes) {
+                    ++hold_notes_;
+                    Note(e->name + ": own start of verb " + std::to_string(ask_verb) + " held (the owner's move: verb " +
+                         std::to_string(e->put_action->verb) + "): answered busy");
+                }
+            } else if (!h->capped) {
+                ++h->asks;
+                ++counts_.own_start_reasks;
+                if (h->asks <= 3 && hold_notes_ < kMaxStreamNotes) {
+                    ++hold_notes_;
+                    Note(e->name + ": own start of verb " + std::to_string(ask_verb) + " asked again after busy (" +
+                         std::to_string(steps_ - h->since) + " frames held, ask " + std::to_string(h->asks) + ")");
+                }
+            }
+            if (!h->capped && steps_ - h->since >= kOwnStartHoldSteps) {
+                h->capped = true;
+                ++counts_.own_start_holds_capped;
+                if (hold_notes_ < kMaxStreamNotes) {
+                    ++hold_notes_;
+                    Note(e->name + ": own start of verb " + std::to_string(ask_verb) + " held " +
+                         std::to_string(kOwnStartHoldSteps) + " frames, asked again " + std::to_string(h->asks) +
+                         " times: answered taken (cap)");
+                }
+            }
+            if (!h->capped) {
+                *answer = addr::kActionSlotBusy;
+                return true;
+            }
+        }
+    }
+    if (node != 0) {
+        e->own_last_verb[ask_slot] = ask_verb;
     }
     if (auto a = ActionFromRequest(request)) {
         a->changed = changed;
@@ -853,6 +917,23 @@ bool Table::OnActionVerb(std::uint64_t bsa, const Request& request, bool changed
     }
     ++counts_.copy_skipped;
     return true;
+}
+
+bool HoldsOwnStarts(std::string_view name) {
+    return name == "Enemy_DungeonBoss_Twinrova";
+}
+
+void Table::EndStartHold(Entry& e, const char* why) {
+    if (!e.start_hold) {
+        return;
+    }
+    const Entry::StartHold& h = *e.start_hold;
+    if (hold_notes_ < kMaxStreamNotes) {
+        ++hold_notes_;
+        Note(e.name + ": own start of verb " + std::to_string(h.verb) + " held " + std::to_string(steps_ - h.since) +
+             " frames, asked again " + std::to_string(h.asks) + " times: " + why);
+    }
+    e.start_hold.reset();
 }
 
 bool RunsOwnStart(std::string_view name) {

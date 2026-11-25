@@ -863,11 +863,26 @@ change:
    change unchanged (`ContinuesChain`), the changes after it are made in order; a copy that stays a copy also keeps the
    old owner's moves still queued. Any change both hold that differs (it had not had all of ours): a resync, as before.
    The log says `the new owner goes on from seq N`.
+3. NEXT49 (4 of 11 copy attacks fired). A copy's attack whose owner's window held none of its own AI's asks of
+   that move fired nothing, whatever node put it in (5 of 5 such windows in NEXT48 and NEXT49). The copy was not
+   cut short: those windows were as long as the ones that fired. After hand-overs the copy's own AI runs its move
+   cycle out of step with the owner's, and the shot needs the copy's own asks of the move (row 222). Now a
+   Twinrova copy's own start (changed 1) of a move other than the owner's current one in that slot is answered
+   busy (`kActionSlotBusy`), for 60 frames at most, so its AI waits at that start. When the owner's move reaches
+   it, the start is taken as before and its own asks of the attack run. The log says `own start of verb V held`,
+   `asked again after busy` and how each hold ended, and the summary line counts them. Not yet known: whether the
+   game's AI asks a start again after a busy answer (the next lane run shows it; if not, another lever).
+4. NEXT49 A 9588: made ours mid-attack while its own AI had already asked another move as a copy. Row 178 started
+   the attack over as ours, sent it to every copy, and then our own AI's next ask took the boss on: the copies
+   played an attack the owner never made, with no shot. Now, when its own AI's last ask in that slot as a copy was
+   another move, its AI goes on and nothing is started over (`PlanMadeOurs`, `own_ask_other`). Log: `its own AI
+   already in verb V: its AI goes on`.
 
 No protocol change. Solo play and owners are not touched. Not covered: a copy made
 the owner drops the old owner's moves still queued (its own AI runs the boss from here). Tests: boss_native_test
 ("Twinrova hand-over": a former owner's nodes are not the copy's, a copy keeps its own across role changes; both moves the new owner made are put
-in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change).
+in, in order; `ContinuesChain` refuses a chain that differs or lacks our newest change; NEXT49: made ours with its
+own AI in another move goes on, and a copy's own start of another move than the owner's waits).
 
 ## A boss part another game killed dies in our game too (rows 257/258, Barinade crash, 0.11.12)
 

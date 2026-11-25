@@ -3473,3 +3473,92 @@ TEST_CASE("native boss: Twinrova hand-over, the new copy makes every move the ne
     older.recent.erase(older.recent.begin() + 1);  // (its newest of ours missing)
     CHECK_FALSE(ContinuesChain(*ours, older));
 }
+
+TEST_CASE("native boss: Twinrova hand-over, made ours mid-move with its own AI already in another move goes on (NEXT49)") {
+    // NEXT49 A 9588: made ours mid-attack, its own AI had asked Fly (80) as a copy. The attack started over as ours
+    // went to every copy, then its own AI's Fly took the boss on: the copies played an attack never made (no shot).
+    constexpr std::uint64_t kShotNode = 0x4000100;
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    (void)t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});  // its node of the attack
+    BossAction a = *ActionFromRequest(GameRequest(121, 0, true));
+    a.changed = true;
+    t.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, ""}}});
+    CHECK(PutIns(t, g) == std::vector<std::int32_t>{121});
+    CHECK(t.OnActionVerb(kBsa, GameRequest(80, kShotNode), true, false, std::string{}));  // its AI goes on to Fly
+    t.Publish({Twinrova(Role::owner)});
+    CHECK(PutIns(t, g).empty());  // nothing started over
+    CHECK(t.Totals().owner_restarted == 0);
+    CHECK(t.Totals().made_ours_own_other == 1);
+    // Its own AI still in the owner's move: started over as before (row 178).
+    Table same;
+    same.SetOn(true, true);
+    same.Publish({Twinrova(Role::copy)});
+    (void)same.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});
+    same.Receive(kActor, BossBsa{1, 2, a, {BossChange{1, a}}}, BossVariants{{BossVariant{1, ""}}});
+    CHECK(PutIns(same, g) == std::vector<std::int32_t>{121});
+    same.Publish({Twinrova(Role::owner)});
+    CHECK(PutIns(same, g) == std::vector<std::int32_t>{121});
+    CHECK(same.Totals().owner_restarted == 1);
+    CHECK(PlanMadeOurs(false, std::nullopt, true, true, true, true) == MadeOurs::resume);
+    CHECK(PlanMadeOurs(false, std::nullopt, true, true, true, false) == MadeOurs::restart_move);
+}
+
+TEST_CASE("native boss: Twinrova hand-over, a copy's own start of another move than the owner's waits (NEXT49)") {
+    // NEXT49: after hand-overs the copy's own AI ran out of step: it never asked the owner's attack in the owner's
+    // window, so the attack had no own asks and fired nothing. Its own start of another move is answered busy.
+    constexpr std::uint64_t kShotNode = 0x4000100;
+    FakeGuest g;
+    const std::int32_t brain = 2;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    t.Publish({Twinrova(Role::copy)});
+    t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{});
+    BossAction fly = *ActionFromRequest(GameRequest(80, 0, true));
+    fly.changed = true;
+    t.Receive(kActor, BossBsa{1, 2, fly, {BossChange{1, fly}}}, BossVariants{{BossVariant{1, ""}}});
+    CHECK(PutIns(t, g) == std::vector<std::int32_t>{80});
+    // The owner flies; its own AI starts the attack early: held.
+    std::uint64_t answer = addr::kActionTaken;
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionSlotBusy);
+    CHECK_FALSE(t.Step(g, false, 0, kMain));  // (a frame)
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionSlotBusy);
+    CHECK(t.Totals().own_starts_held == 1);
+    CHECK(t.Totals().own_start_reasks == 1);
+    // The owner's attack comes: its start is taken now, and its own asks of the attack run (row 222).
+    BossAction a = *ActionFromRequest(GameRequest(121, 0, true));
+    a.changed = true;
+    t.Receive(kActor, BossBsa{2, 2, a, {BossChange{1, fly}, BossChange{2, a}}}, BossVariants{{{1, ""}, {2, ""}}});
+    CHECK(PutIns(t, g) == std::vector<std::int32_t>{121});
+    CHECK(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionTaken);
+    CHECK(t.Totals().own_start_holds_met == 1);
+    CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(121, kShotNode), false, false, std::string{}, nullptr, &answer));
+    // A hold never stalls it: past kOwnStartHoldSteps its start is taken as before.
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionSlotBusy);
+    for (std::uint64_t i = 0; i < Table::kOwnStartHoldSteps; ++i) {
+        (void)t.Step(g, false, 0, kMain);
+    }
+    CHECK(t.OnActionVerb(kBsa, GameRequest(4, kShotNode), true, false, std::string{}, nullptr, &answer));
+    CHECK(answer == addr::kActionTaken);
+    CHECK(t.Totals().own_start_holds_capped == 1);
+    // Another boss's copy is not held.
+    Table other;
+    other.SetOn(true, true);
+    other.Publish({Phantom(Role::copy)});
+    other.OnActionVerb(kBsa, GameRequest(9, kNode), true, false);
+    BossAction rush = *ActionFromRequest(GameRequest(9, 0, true));
+    rush.changed = true;
+    other.Receive(kActor, BossBsa{1, 6, rush, {BossChange{1, rush}}});
+    (void)PutIns(other, g);
+    CHECK(other.OnActionVerb(kBsa, GameRequest(5, kNode), true, false, std::nullopt, nullptr, &answer));
+    CHECK(answer == addr::kActionTaken);
+}
