@@ -2389,6 +2389,34 @@ TEST_CASE("native boss: row 178: our boss fallen far below its fight start choos
     }
 }
 
+TEST_CASE("native boss: a plain enemy of ours held in one move or fallen far is never made to choose again") {
+    // Review of the Lizalfos fix: the stall and fall checks are the bosses' (dungeons-boss.md); a plain enemy's AI
+    // is its own.
+    FakeGuest g;
+    const std::int32_t brain = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+    auto held = Dodongo(Role::owner, "Rolling_Loop", 24);
+    held.plain = true;
+    bool called = false;
+    for (std::uint64_t i = 0; i < Table::kStallSteps * 2; ++i) {
+        CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(5, kNode), false, false));
+        t.Publish({held});
+        called = called || t.Step(g, false, 0, kMain).has_value();
+    }
+    auto fell = Phantom(Role::owner, 10.0f);
+    fell.plain = true;
+    t.Publish({fell});
+    fell.position = coop::protocol::Vec3{1.0f, -400.0f, 2.0f};
+    t.Publish({fell});
+    called = called || t.Step(g, false, 0, kMain).has_value();
+    CHECK_FALSE(called);
+    CHECK(t.Totals().owner_stalls == 0);
+    CHECK(t.Totals().owner_fell == 0);
+}
+
 TEST_CASE("native boss: row 178: our fallen boss is also put back at its fight start, each fall") {
     // The Forest playtest: Phantom Ganon fell ~3 km; a new AI choice alone does not bring a falling body back up.
     FakeGuest g;
