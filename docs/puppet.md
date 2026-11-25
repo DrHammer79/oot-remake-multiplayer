@@ -912,7 +912,10 @@ palette lengths; Equipment on every model). They are look parts 20 to 25, one se
 that dresses a model: a Link model takes Link's eyes and hair (18, 19), a character's model its character parts (hair and
 eyes in any colour on the model's own parameters, the hair and clothes also as the mod's nearest palette texture), and
 Equipment Hidden clears the shown bit of the equipment's pieces each frame, as the mod's own code did. The sites: your
-character in the field and in its Customize picture, and the puppets. Solo too. The mod's six option Ints stay held at 0.
+character in the field and in its Customize picture, and the puppets. Solo too. Your own Link is a site once he has
+worn an eye or hair colour, and stays one: a colour taken off (Default colour, a preset back to the game's own, All
+parts to the game's own) is a change the wardrobe sees, so it puts the game's own back (PR #339; before, with neither
+set he was no longer a site and kept the last colour). The mod's six option Ints stay held at 0.
 Not done: a character whose iris texture is not the common blue one (Impa, Sheik) gets an eye colour shifted by its
 texture's hue (the mod's per-character hue table is not read).
 
