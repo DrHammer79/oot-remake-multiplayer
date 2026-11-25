@@ -3763,14 +3763,46 @@ TEST_CASE("boss shots: a copy never writes through an old room's bullet") {
     Frame(t, g, 2000);
     CHECK(StateOf(g, new_fire) == bs::addr::kStateAwake);
     CHECK(StateOf(g, old_fire) == bs::addr::kStateKept);
-    // A request freed and used again names another actor: that bullet is forgotten, never written.
+    // The slot used again for another create names another actor: only the actor first read is ever written.
     const std::uint64_t other = 0x9900000;
     PutAt(g, other + bs::addr::kActorState, bs::addr::kStateKept);
     PutAt(g, 0x7400000 + 0x1000 + bs::addr::kRequestActor, other);
+    PutAt(g, new_fire + bs::addr::kActorState, bs::addr::kStateKept);  // (it ended)
     t.Receive(kTwinrova, bs::BossShots{2, {{2, "Twinrova_Bullet_FireBullet", a}}});
     Frame(t, g, 3000);
     CHECK(StateOf(g, other) == bs::addr::kStateKept);
-    CHECK(t.GetCounts().dropped == 1);
+    CHECK(StateOf(g, new_fire) == bs::addr::kStateAwake);
+}
+
+TEST_CASE("boss shots: a bullet's actor is read before she is listed, while its slot still names it") {
+    // The game's take of a made actor clears the create's slot (docs/addresses.md, kRequestActor), and her
+    // bullets are made in the intro, before she is listed: the actor is read at once, the slot not again.
+    bs::Table t;
+    t.SetOn(true);
+    FakeGuest g;
+    const std::uint64_t fire = PutBullet(g, t, 0x7000000, "Twinrova_Bullet_FireBullet");
+    Frame(t, g, 1000);
+    PutAt(g, std::uint64_t{0x7000000}, std::uint64_t{0});  // (taken: the slot cleared)
+    bs::Member m = TwinMember(bs::Role::copy, 2);
+    t.Publish({&m, 1});
+    const coop::protocol::Vec3 a{1.0f, 2.0f, 3.0f};
+    t.Receive(kTwinrova, bs::BossShots{1, {{1, "Twinrova_Bullet_FireBullet", a}}});
+    Frame(t, g, 2000);
+    CHECK(StateOf(g, fire) == bs::addr::kStateAwake);
+    CHECK(t.GetCounts().fired == 1);
+    // The owner counts its wake the same way.
+    bs::Table o;
+    o.SetOn(true);
+    FakeGuest h;
+    const std::uint64_t ice = PutBullet(h, o, 0x7100000, "Twinrova_Bullet_IceBullet");
+    Frame(o, h, 1000);
+    PutAt(h, std::uint64_t{0x7100000}, std::uint64_t{0});
+    bs::Member own = TwinMember(bs::Role::owner, 1);
+    o.Publish({&own, 1});
+    Frame(o, h, 2000);
+    PutAt(h, ice + bs::addr::kActorState, bs::addr::kStateAwake);
+    Frame(o, h, 3000);
+    CHECK(o.GetCounts().owner_kept == 1);
 }
 
 TEST_CASE("boss shots: a copy puts back its own wake before it wakes the owner's shot of the same frame") {

@@ -897,9 +897,10 @@ ends. In the fight there is no create and no call of the shoot code main+0xc16cf
 bullets were the twelve made in the intro, by address). The game's own wake is a compare-and-swap of 3 to 4 in the
 actor manager (main+0x14acc).
 
-- Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST). They are forgotten when her
-  room goes, and one whose request later names another actor than the first seen (freed and used again) is forgotten
-  and never written through.
+- Every game keeps the handles of its `Twinrova_Bullet_*` creates (CREATE_REQUEST) and reads each one's actor
+  (request +0x08) at the next frames. The game's take of a made actor clears the slot, and the bullets are made in
+  the intro, before she is listed: read later, none gave an actor (NEXT68). The slot is not read again, since it is
+  used for other creates. The bullets are forgotten when her room goes.
 - The owner's game reads its bullets every frame. A wake (3 to 4) is one shot. The bullets awake now, each with its
   seq, name and place, go out in the boss's samples (OBJECT_SAMPLE component 29 `shots`, no protocol bump); an empty
   list is sent for 500 ms after the last one ends.

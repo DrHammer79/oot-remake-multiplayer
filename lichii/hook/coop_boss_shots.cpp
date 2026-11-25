@@ -57,28 +57,21 @@ void Table::Note(std::string text) {
     }
 }
 
-// The bullet's actor when it is in `state`; 0 when not, or gone. A request that now names another actor than the
-// one first seen was freed with its room: the bullet is forgotten (handle 0) and never written through again.
+// The bullet's actor when it is in `state`; 0 when not, or not read yet.
 std::uint64_t Table::Live(CoopPuppet::Guest& guest, Bullet& b, std::uint32_t state) {
-    if (b.handle == 0) {
-        return 0;
-    }
-    const std::uint64_t actor = ActorOf(guest, b.handle);
-    if (actor == 0) {
-        return 0;
-    }
-    if (b.actor == 0) {
-        b.actor = actor;
-    } else if (actor != b.actor) {
-        b.handle = 0;
-        return 0;
-    }
     std::uint32_t now = 0;
-    return Get(guest, actor + addr::kActorState, now) && now == state ? actor : 0;
+    return b.actor != 0 && Get(guest, b.actor + addr::kActorState, now) && now == state ? b.actor : 0;
 }
 
-void Table::Forget() {
-    std::erase_if(bullets_, [](const Bullet& b) { return b.handle == 0; });
+// The game's take of a made actor clears the create's slot (docs/addresses.md, kRequestActor), and her bullets are
+// made in the intro, before she is listed: each actor is read while its slot still names it, and the slot is not
+// read again (it is used for other creates). Her room's bullets go with her room (Publish).
+void Table::ReadActors(CoopPuppet::Guest& guest) {
+    for (Bullet& b : bullets_) {
+        if (b.actor == 0) {
+            b.actor = ActorOf(guest, b.handle);
+        }
+    }
 }
 
 void Table::KeepBullet(std::uint64_t handle, std::string_view name) {
@@ -272,7 +265,11 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool, std:
         }
         main_base_ = main_base;
     }
-    if (!on_ || main_base == 0 || entries_.empty()) {
+    if (!on_ || main_base == 0) {
+        return std::nullopt;
+    }
+    ReadActors(guest);
+    if (entries_.empty()) {
         return std::nullopt;
     }
     Entry& e = entries_.begin()->second;  // (one Twinrova: her bullets are the room's)
@@ -281,7 +278,6 @@ std::optional<CoopPuppet::Call> Table::Step(CoopPuppet::Guest& guest, bool, std:
     } else {
         StepCopy(guest, e);
     }
-    Forget();
     return std::nullopt;
 }
 

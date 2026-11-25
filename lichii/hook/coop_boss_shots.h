@@ -10,7 +10,9 @@
 // Her bullets are made once at room load, each through a create request whose handle the game keeps, and stay kept
 // (actor state 3). Her AI fires one by waking it (state 4) and it goes back to 3 when it ends: no create and no call
 // of the shoot code in the fight (NEXT65, NEXT66). So:
-// - Every game keeps the handles of its Twinrova bullets as they are made (CREATE_REQUEST, KeepBullet).
+// - Every game keeps the handles of its Twinrova bullets as they are made (CREATE_REQUEST, KeepBullet) and reads
+//   each one's actor at the next frames, before the game's take clears the handle's slot (NEXT68: read later, none
+//   gave an actor).
 // - The owner's game counts each wake of one of them as a shot and sends the bullets awake now, with their places,
 //   in the boss's samples (OBJECT_SAMPLE component 29, coop::protocol::BossShots).
 // - A copy game wakes a kept bullet of the same name for each owner shot, as the game's own wake does (state 3 to 4,
@@ -110,7 +112,7 @@ private:
         bool awake = false;          // ours: awake when last read
         std::uint32_t seq = 0;       // ours: its wake's seq; a copy: the owner shot it shows (0: none)
         coop::protocol::Vec3 position{};
-        std::uint64_t actor = 0;     // its actor when first seen; another there later: a freed request, forgotten
+        std::uint64_t actor = 0;     // its actor, read while the slot named it (0: not yet)
     };
     struct Entry {
         Member member;
@@ -125,7 +127,7 @@ private:
     void StepOwner(CoopPuppet::Guest& guest, Entry& e, std::uint64_t now_us);
     void StepCopy(CoopPuppet::Guest& guest, Entry& e);
     std::uint64_t Live(CoopPuppet::Guest& guest, Bullet& b, std::uint32_t state);
-    void Forget();
+    void ReadActors(CoopPuppet::Guest& guest);
 
     mutable std::mutex mutex_;
     bool on_ = false;
