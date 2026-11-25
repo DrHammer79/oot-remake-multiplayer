@@ -263,3 +263,31 @@ TEST_CASE("original game: a list of ours whose kept file is gone is never kept a
     REQUIRE(CoopOriginal::ApplyMods(f.mods, false, why));
     CHECK_FALSE(fs::exists(f.mods / "coop-mods.list"));   // (not every mod off for good)
 }
+
+TEST_CASE("original game: switch off, the kept file gone and our list left: the list goes (every mod back)") {
+    Folder f;
+    std::string why;
+    REQUIRE(CoopOriginal::ApplyMods(f.mods, true, why));
+    fs::remove(f.mods / CoopOriginal::kBackupFile);
+    bool changed = false;
+    REQUIRE(CoopOriginal::Sync(f.mods, false, changed, why));   // (a start with the switch off)
+    CHECK(changed);
+    CHECK_FALSE(fs::exists(f.mods / "coop-mods.list"));
+    REQUIRE(CoopOriginal::Sync(f.mods, false, changed, why));
+    CHECK_FALSE(changed);
+    // the F1 tab's way back the same
+    REQUIRE(CoopOriginal::ApplyMods(f.mods, true, why));
+    fs::remove(f.mods / CoopOriginal::kBackupFile);
+    REQUIRE(CoopOriginal::ApplyMods(f.mods, false, why));
+    CHECK_FALSE(fs::exists(f.mods / "coop-mods.list"));
+    // a player's own list with no kept file is never touched
+    const std::string mine = "coop-mods 1
+off some-mod
+";
+    {
+        std::ofstream(f.mods / "coop-mods.list", std::ios::binary) << mine;
+    }
+    REQUIRE(CoopOriginal::Sync(f.mods, false, changed, why));
+    CHECK_FALSE(changed);
+    CHECK(Slurp(f.mods / "coop-mods.list") == mine);
+}

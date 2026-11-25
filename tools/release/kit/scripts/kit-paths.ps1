@@ -2111,7 +2111,14 @@ function Sync-KitOriginalMods([string]$ModsDir, [bool]$On) {
     }
     try {
         if (-not $On) {
-            if (-not (Test-Path -LiteralPath $kept -PathType Leaf)) { return '' }
+            if (-not (Test-Path -LiteralPath $kept -PathType Leaf)) {
+                # (no kept file, but a list of ours left behind (the kept file lost, an older kit's): it would leave
+                # every mod off with the switch off, so it goes, as CoopOriginal::ApplyMods)
+                $now = if (Test-Path -LiteralPath $list -PathType Leaf) { [System.IO.File]::ReadAllText($list) } else { '' }
+                if ($now -notmatch "^[^`n]*`n# Original game") { return '' }
+                Remove-Item -LiteralPath $list -Force
+                return 'Original game is off: the mods list it left is gone, every mod is back.'
+            }
             $before = [System.IO.File]::ReadAllText($kept)
             if ($before -eq '') { Remove-Item -LiteralPath $list -Force -ErrorAction SilentlyContinue }
             else { & $write $list $before }

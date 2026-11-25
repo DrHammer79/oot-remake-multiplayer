@@ -2306,6 +2306,13 @@ try {
     [void](Sync-KitOriginalMods $om $true); Remove-Item -LiteralPath $omKept -Force
     [void](Sync-KitOriginalMods $om $true)
     Check ((Get-Item $omKept).Length -eq 0) 'original sync: our own list is never kept as the player''s'
+    # Switch off, the kept file gone and our list left: the list goes (not every mod off for good); a player's own stays
+    Remove-Item -LiteralPath $omKept -Force
+    $l = Sync-KitOriginalMods $om $false
+    Check ($l -ne '' -and -not (Test-Path $omList)) 'original sync: off, kept gone, our list left -> removed'
+    Check ((Sync-KitOriginalMods $om $false) -eq '') 'original sync: off, nothing left -> nothing'
+    [IO.File]::WriteAllText($omList, "coop-mods 1`noff some-mod`n", (New-Object System.Text.UTF8Encoding($false)))
+    Check ((Sync-KitOriginalMods $om $false) -eq '' -and (Read-File $omList) -ceq "coop-mods 1`noff some-mod`n") 'original sync: off, a player''s own list, no kept file -> untouched'
 } finally {
     Remove-Item -LiteralPath $om -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -130,7 +130,13 @@ bool ApplyMods(const fs::path& mods, bool on, std::string& why) {
         }
         return true;
     }
-    if (!fs::exists(kept, ec)) return true;   // (never original here: nothing to put back)
+    if (!fs::exists(kept, ec)) {
+        // (no kept file: nothing to put back. A list of ours left behind (the kept file lost, or an older kit's) would
+        // leave every mod off with the switch off: it goes, as no list was there before ours, report 266 review)
+        std::string now;
+        if (Read(list, now) && OursIn(now)) fs::remove(list, ec);
+        return true;
+    }
     std::string before;
     if (!Read(kept, before)) {
         why = "could not read " + Utf8(kept);
@@ -151,7 +157,8 @@ bool Sync(const fs::path& mods, bool on, bool& changed, std::string& why) {
     std::error_code ec;
     const fs::path list = mods / HOS_COOP_MODS_LIST_FILE, kept = mods / kBackupFile;
     if (!on) {
-        if (!fs::exists(kept, ec)) return true;
+        std::string now;
+        if (!fs::exists(kept, ec) && !(Read(list, now) && OursIn(now))) return true;
         changed = true;
         return ApplyMods(mods, false, why);
     }
