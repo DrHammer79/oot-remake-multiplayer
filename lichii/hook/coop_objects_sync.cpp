@@ -606,6 +606,22 @@ std::optional<bool> AttackWithRally(const Seen& s, const std::vector<std::string
     return false;
 }
 
+std::vector<std::uint64_t> RallyReturnedTo(const std::vector<Seen>& seen, const std::vector<std::string_view>& makers) {
+    std::vector<std::uint64_t> out;
+    for (const Seen& s : seen) {
+        if (s.address == 0 || std::find(out.begin(), out.end(), s.address) != out.end()) {
+            continue;
+        }
+        for (const std::string_view m : makers) {
+            if (s.name.starts_with(m)) {
+                out.push_back(s.address);
+                break;
+            }
+        }
+    }
+    return out;
+}
+
 std::string_view PackFamily(std::string_view name) {
     // Pair/pack survey (2026-11-21): these fight together by messages each one's AI writes into its ally's
     // blackboard (Lizalfos/Dinolfos: SetBattlingAllyFromReferenceLink, IsRequestingCoop, IsReceivedCoop*Message;

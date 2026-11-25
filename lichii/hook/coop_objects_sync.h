@@ -630,6 +630,15 @@ std::vector<std::string_view> RallyMakers(const std::vector<std::string>& actor_
 // flies, so the owner's volley ('Parry_Ready') and the stun of a rally won ran in a game that had just become a copy
 // and the new owner's verbs took them over. Not read stays not read.
 std::optional<bool> AttackWithRally(const Seen& s, const std::vector<std::string_view>& rally_makers);
+// Rows 177/211 (row-177-ball): the bosses in `seen` that made one of `makers` (RallyMakers of the rally balls our
+// own Link sent back in this walk), each once. Every boss ball is a split shot (each game fires its own), so a
+// player who does not own the boss rallies their own ball with their game's copy of him. The game's own answer
+// to a ball sent back is the maker's own AI (its sensor query, its Shooter's RequestChangeStateReflected, the
+// volley 'Parry*', the knockdown 'LightBallDamage_*'), and a copy's own AI changes are skipped for the owner's
+// verbs, so in proof run 20261123-083911 the copy's own 'Parry02_Ready' was played over by the owner's 'Parry'
+// and no return ever stunned him (0 own stuns, 0 hits by our shots). Each such copy then runs its own reaction
+// (CoopBossNative::Table::NoteOwnHit, by shot), as for our seed in Gohma's eye; its stun hands him to us.
+std::vector<std::uint64_t> RallyReturnedTo(const std::vector<Seen>& seen, const std::vector<std::string_view>& makers);
 // Row 149: the root a boss part follows in a walk (PartOf's roots in order, the nearest in reach; on a tie the
 // the first in the walk), as GroupsOf picks it; nothing for no boss part or no root in the walk. `names` and `places`
 // are the walk's, one per actor.
