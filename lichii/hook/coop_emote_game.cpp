@@ -19,6 +19,7 @@ namespace {
 struct Glue {
     std::mutex mutex;
     std::vector<std::string> lines;  // any thread -> chat box
+    std::vector<std::uint8_t> calls;  // the network thread -> the fairies (TakeCalls)
     Limiter limiter;
 
     void Line(std::string text) {
@@ -108,6 +109,9 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client) {
     Glue& g = TheGlue();
     std::lock_guard lock(g.mutex);
     g.Line(std::move(line));
+    if (g.calls.size() < 16) {
+        g.calls.push_back(emote->player_number);
+    }
 }
 
 std::vector<std::string> TakeLines() {
@@ -115,6 +119,14 @@ std::vector<std::string> TakeLines() {
     std::lock_guard lock(g.mutex);
     std::vector<std::string> out;
     out.swap(g.lines);
+    return out;
+}
+
+std::vector<std::uint8_t> TakeCalls() {
+    Glue& g = TheGlue();
+    std::lock_guard lock(g.mutex);
+    std::vector<std::uint8_t> out;
+    out.swap(g.calls);
     return out;
 }
 

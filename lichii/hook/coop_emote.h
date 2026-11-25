@@ -16,6 +16,9 @@
 //    emote's hold time (Holds). The hold ends early when the sender's own
 //    animation changes from what it was when the emote started (they moved
 //    or did something), and at once when the sender leaves.
+// 3. A call (Def::heard: /here) also reaches every other game's chat, and
+//    flies the caller's Navi up over their head for a few seconds where she
+//    is shown (coop_emote_game.h TakeCalls, CoopFairy::Follower::Call).
 // The sender's own screen shows only a chat notice: their own Link is never
 // animated by the emote (their own game controls it). Solo: nothing is sent.
 #pragma once

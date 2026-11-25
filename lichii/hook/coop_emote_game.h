@@ -4,6 +4,7 @@
 // rules; the puppet side is in coop_puppet.cpp).
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,5 +30,10 @@ void OnEvent(const coop::net::Event& event, coop::net::Client& client);
 
 // The chat notices since the last call (for the chat box).
 std::vector<std::string> TakeLines();
+
+// The player numbers whose call (an EMOTE with something to read, as OnEvent's notice) came since the last call,
+// oldest first: CoopFairy's Publish flies each caller's Navi up over their head (the ping's marker). At most 16
+// wait; more are dropped.
+std::vector<std::uint8_t> TakeCalls();
 
 } // namespace CoopEmote
