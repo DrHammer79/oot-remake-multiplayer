@@ -6453,7 +6453,11 @@ private:
             if (IsShared(actor.name)) {  // enemies and breakables
                 Life(r, a, actor);
             }
-            if (actor.name.find("PivotedFloor") != std::string::npos) {
+            // Known issue (PR #315 catch-up): a ceiling Gold Skulltula that turns to a player stays still on the
+            // other screen. The same yaw note in every game (owner and copy) tells whether its actor turn (+0x328)
+            // turns in the owner's game and whether the copy's follows; no yaw line while it visibly turns: the
+            // turn is not the actor's (a bone or look IK).
+            if (actor.name.find("PivotedFloor") != std::string::npos || actor.name == "Enemy_Skulltula_Gold") {
                 TurnNote(r, a, actor);
             }
             if (actor.name.starts_with("Enemy_ReDead") || actor.name.starts_with("Enemy_Gibdo")) {
