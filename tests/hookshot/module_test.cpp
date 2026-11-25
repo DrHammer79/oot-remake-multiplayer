@@ -1249,7 +1249,7 @@ TEST_CASE("hookshot: a guest's ask makes the host's game save first, with the ca
     // (the test commands' autosave asks only while a file is played, and only where the call exists)
     CHECK(save.find("if (!g_save_requests || !g_in_game) return false;") != std::string::npos);
     // (the calc thread's every-frame look takes no lock: an atomic set when an ask opens a round)
-    const auto take = save.find("bool TakeSaveRequest() {");
+    const auto take = save.find("SaveRequest TakeSaveRequest() {");
     REQUIRE(take != std::string::npos);
     CHECK(save.find("if (!g_save_request_due.exchange(false, std::memory_order_acq_rel)) return SaveRequest::none;",
                     take) <
