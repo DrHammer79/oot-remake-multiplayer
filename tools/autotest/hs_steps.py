@@ -813,6 +813,8 @@ def main(argv=None):
         say("window placement: %s" % e)
         return 2
     if mon:
+        if mon.get("note"):
+            say("window placement: %s" % mon["note"])
         say("windows go to %s (work area %s)" % (mon["name"], mon["work"]))
     games.server_delay = hk.test_delay_args(a.test_delay_ms, a.test_jitter_ms)
     games.renderer = (a.renderer_wait or games.timeout, a.renderer_stall or hk.RENDERER_STALL,
