@@ -84,6 +84,9 @@ std::optional<AsSlot> ReadSlot0(CoopPuppet::Guest& guest, std::uint64_t actor) {
 
 void Crawl::Want(const Wanted& w) {
     std::lock_guard lock(mutex_);
+    if (!want_.lying && w.lying) {
+        held_again_ = 0;  // a new down (the same Link too): its own note and count
+    }
     // An adult laid down by kLyingPose gets up through the game's
     // LDamageStandUp: the game's own requests on our slot are skipped from
     // now (Skip), before its own Walk / Wait would take the slot this frame.
