@@ -361,6 +361,7 @@ private:
     bool pose_tried_ = false;          // this frame's pose step done
     float pending_rate_ = 0.0f;        // the play call in flight
     std::uint64_t posed_actor_ = 0;    // the actor the pose was last held on (0: none)
+    std::uint32_t held_again_ = 0;     // this down's holds after the first (the log: noted once, counted on the get-up line)
     int releases_left_ = 0;            // plays at kPlayRate still allowed (getting up)
     int release_frames_ = 0;           // frames slot 0 is still watched for the held pose (getting up)
     bool standing_ = false;            // an adult up from the pose: LDamageStandUp asked, the game's own skipped

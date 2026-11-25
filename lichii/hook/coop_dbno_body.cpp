@@ -460,17 +460,20 @@ std::optional<CoopPuppet::Call> Crawl::Next(CoopPuppet::Guest& guest, bool after
                 const bool first = posed_actor_ != want_.actor;
                 posed_actor_ = want_.actor;
                 if (first) {
+                    held_again_ = 0;
                     Note("our downed adult Link: the game's AS '" + std::string(kLyingPose) +
                          "' held at frame 0 (lying; the crawl's own clips are the child's)");
-                } else if (counts_.poses <= 4 || counts_.poses % 100 == 0) {
+                } else if (++held_again_ == 1) {
+                    // A test 'hurt' down has the game play DamageS nearly every frame (NEXT60: 1300 lines at
+                    // every 100th): noted once a down, the count goes on the get-up line.
                     Note("our downed adult Link: '" + std::string(kLyingPose) + "' held again (the game played '" +
-                         pose_seen_ + "'; " + std::to_string(counts_.poses) + " so far)");
+                         pose_seen_ + "'; noted once, counted when he gets up)");
                 }
             } else {
                 ++counts_.releases;
                 Note("our Link up: the game's AS '" + std::string(kLyingPose) +
                      "' played on from the held pose (the game's stand-up from lying; slot 0 had '" + pose_seen_ +
-                     "')");
+                     "'; held again " + std::to_string(held_again_) + " times this down)");
             }
             break;
         case Pending::crawl:
