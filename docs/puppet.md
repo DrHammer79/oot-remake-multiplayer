@@ -889,7 +889,13 @@ Your own Link's colours are drawn over the game textures your wardrobe finds by 
 texture with the game's own texels: the wearer (sword) copies name textures of their own, marked `0x80 + n`
 (`look_items.blade_*`); a puppet wears its slot's look copy from the moment it has a slot (`CopyOf`), and a puppet with
 no slot (more players than slots) the pack's neutral copy (`"neutral"`, never painted); the wardrobe logs "row 198
-guard" when one of your textures is found more than once. With Character Select, its own Customize options are held at
+guard" when one of your textures is found more than once. The puppets' tunic copies too (0.11.10 host log, `row 198 cross guard: tunic #0 on
+puppets' tunics #21`): a copy painted from `green.bin` (your own Link's texels), and since row 243 a green player's copy
+drawn in `green.bin` as it is, was your own Link's texels exactly, and the puppets' wardrobes also searched the game's
+memory for their painting, so the puppets' tunics wardrobe took your Link's tunic for a copy and drew a puppet's colours
+on it (and yours on theirs). Now every texture a copy is painted in carries the copy's mark (`kSelfMark ^ kTunicMark`
+on its last byte, as the pack marks it), and the puppets' wardrobes (gear, boots, tunics: `Host::target_in_memory`
+false) look only for the copies as the pack wrote them. With Character Select, its own Customize options are held at
 0 (one customizer: ours) and the options a 0.11.8 game sends (part 62) are not kept. Why, and it stays: the mod's
 per-frame code puts the six options of the game it runs in on every player-like actor, the puppets too, so the
 viewer's options showed on everyone (and its own screen is co-op's now). Holding them at 0 makes its code read and go
