@@ -8,7 +8,8 @@
 #! switches B:LICHII_COOP_HOST_SAVE=1,B:LICHII_COOP_TEST_OWN_SAVE=0
 #! timeout 540
 server stop
-start A B
+# launch, not start: the server is down, so no game can be welcomed yet (start waited 540 s for it and A never came)
+launch A B
 sleep 10
 play B save-refresh.press.txt
 shot b-list-open
@@ -22,7 +23,6 @@ lines b-guest B min=1 coop: welcomed as player 2
 lines b-switched B min=1 coop: save: now playing from the co-op save folder
 lines b-quiet B max=40 coop: title: save list: the game's list reset said not now
 play B save-refresh.back.txt
-sleep 15
 shot b-title-back
 lines b-list-read B min=1 coop: title: save list: read again by the game: a save yes
 lines b-not-kept B max=0 coop: title: save list: the open title keeps its buttons
