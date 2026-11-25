@@ -1,3 +1,0 @@
-# save-delete: B on the load list presses X (second guess for the delete action).
-press X
-wait 120
