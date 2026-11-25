@@ -1771,6 +1771,51 @@ TEST_CASE("native boss: row 149: a copy made ours chooses again unless its own A
     }
 }
 
+TEST_CASE("native boss: row 149: a plain enemy copy made ours chooses again too (the Spirit Temple Lizalfos)") {
+    // fullpass seg 2: two Lizalfos ran their owner's verbs as copies (their own brain skipped); the owner's Link
+    // went into an event, the server gave them to us, and they stood still until hit. A plain enemy made ours
+    // chooses again once, as a boss does; one handed over in its own time (its wake for our Link) is left.
+    FakeGuest g;
+    const std::int32_t brain = 12;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Boss liz{kActor, kBsa, Role::copy, "Enemy_Lizalfos", 9};
+    liz.plain = true;
+    liz.animation = "SideWalk";
+    {
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({liz});
+        t.Receive(kActor, BossBsa{3, 12, std::nullopt, {}});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        Boss ours = liz;
+        ours.role = Role::owner;
+        t.Publish({ours});
+        const auto c = t.Step(g, false, 0, kMain);
+        REQUIRE(c);
+        CHECK(c->function == kMain + addr::kSetBrainVerb);
+        CHECK(c->x[0] == kBsa);
+        CHECK(c->x[1] == 12);
+        CHECK_FALSE(t.OnBrainVerb(kBsa, brain, true, true));
+        CHECK_FALSE(t.Step(g, true, 0, kMain));
+        CHECK(t.Totals().owner_rechosen == 1);
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+    }
+    {
+        // Its own wake for our Link ran its own brain: left as it is.
+        Table t;
+        t.SetOn(true, true);
+        t.Publish({liz});
+        t.Receive(kActor, BossBsa{3, 12, std::nullopt, {}});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        t.NoteOwnWake(kActor);
+        Boss ours = liz;
+        ours.role = Role::owner;
+        t.Publish({ours});
+        CHECK_FALSE(t.Step(g, false, 0, kMain));
+        CHECK(t.Totals().owner_rechosen == 0);
+    }
+}
+
 TEST_CASE("native boss: row 169: a copy's own stun is its own time, and a hand-over during it keeps the stun") {
     FakeGuest g;
     const std::int32_t brain = 12;
@@ -2342,6 +2387,34 @@ TEST_CASE("native boss: row 178: our boss fallen far below its fight start choos
         CHECK_FALSE(s.Step(g, false, 0, kMain));
         CHECK(s.Totals().owner_fell == 0);
     }
+}
+
+TEST_CASE("native boss: a plain enemy of ours held in one move or fallen far is never made to choose again") {
+    // Review of the Lizalfos fix: the stall and fall checks are the bosses' (dungeons-boss.md); a plain enemy's AI
+    // is its own.
+    FakeGuest g;
+    const std::int32_t brain = 6;
+    g.Write(kBsa + addr::kBsaBrainVerb, &brain, 4);
+    Table t;
+    t.SetOn(true, true);
+    CHECK_FALSE(t.OnBrainVerb(kBsa, brain, false, false));
+    auto held = Dodongo(Role::owner, "Rolling_Loop", 24);
+    held.plain = true;
+    bool called = false;
+    for (std::uint64_t i = 0; i < Table::kStallSteps * 2; ++i) {
+        CHECK_FALSE(t.OnActionVerb(kBsa, GameRequest(5, kNode), false, false));
+        t.Publish({held});
+        called = called || t.Step(g, false, 0, kMain).has_value();
+    }
+    auto fell = Phantom(Role::owner, 10.0f);
+    fell.plain = true;
+    t.Publish({fell});
+    fell.position = coop::protocol::Vec3{1.0f, -400.0f, 2.0f};
+    t.Publish({fell});
+    called = called || t.Step(g, false, 0, kMain).has_value();
+    CHECK_FALSE(called);
+    CHECK(t.Totals().owner_stalls == 0);
+    CHECK(t.Totals().owner_fell == 0);
 }
 
 TEST_CASE("native boss: row 178: our fallen boss is also put back at its fight start, each fall") {

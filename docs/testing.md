@@ -394,6 +394,8 @@ A steps run also writes `steps.txt`: each step with the local time to the millis
 
 ### Input scripts
 
+`LICHII_COOP_TEST_LIFE_HOLD` (test only; players never set it) holds our Link's life full on every object walk, so a lane run can stand in an enemy room: `1` at his own max, 4 to 80 also sets his max (quarter hearts). `setflag PlayerStatus.Life` cannot do this: Link's own Life component, which his hearts and damage use, writes its value back over the flag. The hold writes the component, as the heart container's refill does; a Link at 0 is left to the game ([coop_test_life_hold.h](../lichii/hook/coop_test_life_hold.h)).
+
 The emulator reads scripted input from the file in `LICHII_COOP_TEST_SCRIPT` ([coop_testinput.h](../lichii/hook/coop_testinput.h)). It looks at the file about twice a second; each time the file changes, it plays it from the start into player 1's pad, on top of the real keyboard. The window needs no focus. Time is counted in ticks of 1/60 s of real time.
 
 | Line | Does |

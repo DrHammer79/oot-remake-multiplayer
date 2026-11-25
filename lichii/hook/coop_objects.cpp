@@ -107,6 +107,7 @@
 #include "coop/host/session.hpp"
 #include "coop/net/client.hpp"
 #include "coop_objects_sync.h"
+#include "coop_test_life_hold.h"
 #include "coop_follow.h"
 #include "coop_frame_clock.h"
 #include "coop_link_sound.h"
@@ -692,16 +693,16 @@ public:
             // back to 'GroundWait', and once it became ours it never tried
             // again: its AI waits for the end of a play we took away. Give
             // it that play back once.
-            if (const auto w = wanted_.find(a); w != wanted_.end()) {
+            // (Spirit Temple Lizalfos: however long ago it chose; an 8 s limit left an AI that chose once
+            // waiting for a play it never got back, idle until a Link came close.)
+            if (auto chosen = wanted_.Take(a)) {
                 const bool replay = std::find(no_replay.begin(), no_replay.end(), a) == no_replay.end();
                 if (!replay) {
                     LOG_INFO(Core, "coop: objects: {:#x} became ours: a boss on the brain path, its own AI goes "
-                                   "on (no '{}' replay, row 178)", a, w->second.first);
+                                   "on (no '{}' replay, row 178)", a, *chosen);
+                } else if (wakes_.size() < 64) {
+                    wakes_.emplace_back(a, std::move(*chosen));
                 }
-                if (replay && SteadyMs() - w->second.second <= kWakeReplayMs && wakes_.size() < 64) {
-                    wakes_.emplace_back(a, w->second.first);
-                }
-                wanted_.erase(w);
             }
         }
     }
@@ -717,7 +718,7 @@ public:
             wakes_.emplace_back(actor, std::move(name));
         }
         std::erase_if(plays_, [actor](const PlayWish& p) { return p.address == actor && p.slot == 0; });
-        wanted_.erase(actor);
+        wanted_.Drop(actor);
     }
 
     // Releases made since the last ask: bit found set and cleared, and not.
@@ -1110,16 +1111,10 @@ public:
             // Remembered even on the first play we make on this copy (the
             // peahat rerun: its rise was the first thing the Mover put back,
             // so the check above had nothing to compare with).
-            if (p.slot == 0 && !slot_name.empty() &&
-                AnimationBase(slot_name) != AnimationBase(p.name)) {
-                if (wanted_.size() >= 256) {
-                    std::erase_if(wanted_, [now_ms](const auto& e) {
-                        return now_ms - e.second.second > kWakeReplayMs;
-                    });
-                }
-                if (wanted_.size() < 256) {
-                    wanted_[p.address] = {slot_name, now_ms};
-                }
+            if (p.slot == 0) {
+                const auto last = played_at_.find(p.address);
+                wanted_.Saw(p.address, slot_name, last != played_at_.end() ? last->second.first : std::string(),
+                            p.name, now_ms);
             }
             const u64 text = Cell(guest, p.name);
             if (text == 0) {
@@ -1655,8 +1650,7 @@ private:
     std::vector<Pose> work_;
     // Issue 157: the animation each copy's own AI last chose that we put
     // back (name, steady ms), and the ones to give back once it is ours.
-    static constexpr u64 kWakeReplayMs = 8000;
-    std::unordered_map<u64, std::pair<std::string, u64>> wanted_;
+    OwnChoices wanted_;
     std::vector<std::pair<u64, std::string>> wakes_;
     std::vector<std::pair<u64, std::string>> work_wakes_;
     std::size_t next_wake_ = 0;
@@ -4562,6 +4556,28 @@ private:
                         LOG_INFO(Core,
                                  "coop: objects: our Link's life {} of {}, MaxLife flag {} (quarter hearts)",
                                  life, max, flag);
+                    }
+                    // Test only (coop_test_life_hold.h): Link's life held full for a lane run in an enemy room.
+                    static const std::optional<std::int32_t> life_hold = [] {
+                        const auto h = CoopTestLifeHold::Parse(EnvText("LICHII_COOP_TEST_LIFE_HOLD"));
+                        if (h) {
+                            LOG_INFO(Core, "coop: test life hold on: our Link's life held at {} (LICHII_COOP_TEST_LIFE_HOLD)",
+                                     *h > 0 ? std::to_string(*h) : std::string("his max"));
+                        }
+                        return h;
+                    }();
+                    if (life_hold && memory_ != nullptr && memory_->IsValidVirtualAddressRange(value->first + 8, 4) &&
+                        memory_->IsValidVirtualAddressRange(value->second + 8, 4)) {
+                        const auto w = CoopTestLifeHold::Step(*life_hold, life, max);
+                        if (w.max) {
+                            memory_->Write32(value->second + 8, static_cast<u32>(*w.max));
+                        }
+                        if (w.life) {
+                            memory_->Write32(value->first + 8, static_cast<u32>(*w.life));
+                        }
+                        if (w.max || (w.life && *w.life - life >= 4)) {
+                            CoopLifeGauge::TheRefresher().Want(SteadyNowMs());  // row 238: the HUD shows it
+                        }
                     }
                     if (known.first == "Player_Child" || known.first == "Player_Adult") {
                         GivePvp(r, a, value->first + 8, life);  // PvP (coop_pvp_game.cpp)
