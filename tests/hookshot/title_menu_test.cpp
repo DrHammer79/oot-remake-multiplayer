@@ -1269,6 +1269,15 @@ TEST_CASE("title menu: a host's relay line goes out with its join password, so a
     CHECK_FALSE(RelayLineWithoutPassword("192.168.1.20:27510"));
     CHECK_FALSE(RelayLineWithoutPassword("mypc"));
     CHECK_FALSE(RelayLineWithoutPassword("bad room@relay"));
+    // The Host page's Code row shows the bare line (never a letter of the password: ShownCode keeps the line's ends);
+    // only the clipboard's has the password after it.
+    CHECK(HostShareText(room, "ABCD-EFGH@159.54.182.85:27530", "", password, false) == room);
+    CHECK(HostShareText(room, "ABCD-EFGH@159.54.182.85:27530", "", password, true) == line);
+    CHECK(HostShareText("", "ABCD-EFGH@1.2.3.4", "INVITE", password, false) == "ABCD-EFGH@1.2.3.4");
+    CHECK(HostShareText("", "ABCD-EFGH@1.2.3.4", "INVITE", password, true) == "ABCD-EFGH@1.2.3.4 " + password);
+    CHECK(HostShareText("", "", "ABCDE-FGHJK", password, true) == "ABCDE-FGHJK");   // (the invite holds it already)
+    CHECK(HostShareText("", "", "", password, true).empty());
+    CHECK(HostShareText(room, "", "", password, false).find(password.substr(password.size() - 8)) == std::string::npos);
 }
 
 TEST_CASE("title menu: a bare Join name is a PC or a room, and its line through the relay") {

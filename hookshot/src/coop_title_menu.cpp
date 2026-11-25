@@ -640,6 +640,12 @@ std::string RelayShareLine(std::string_view relay_line, std::string_view passwor
     return std::string(line) + " " + std::string(pass);
 }
 
+std::string HostShareText(std::string_view relay_room, std::string_view relay_code, std::string_view invite,
+                          std::string_view password, bool copied) {
+    const std::string_view line = !Trim(relay_room).empty() ? relay_room : !Trim(relay_code).empty() ? relay_code : invite;
+    return copied ? RelayShareLine(line, password) : std::string(Trim(line));
+}
+
 bool RelayLineWithoutPassword(std::string_view join_line) {
     const std::string_view t = Trim(join_line);
     return t.find('@') != std::string_view::npos && t.find_first_of(" \t") == std::string_view::npos && AddressOk(t);

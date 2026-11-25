@@ -22,7 +22,8 @@ function ConvertTo-RelayJoin([string]$Text) {
     $at = $s.IndexOf('@')
     if ($at -lt 0) { return $null }
     # (the relay is the first word after the '@'; a word after it is the password, which has no spaces)
-    $after = $s.Substring($at + 1).TrimStart()
+    # (a port pasted apart from its relay, 'relay : 27530', is the relay's, not a password)
+    $after = $s.Substring($at + 1).TrimStart() -replace '^([^\s:]+)\s*:\s*(\d{1,5})(?=\s|$)', '$1:$2'
     $password = $null
     $gap = [regex]::Match($after, '\s')
     if ($gap.Success) {

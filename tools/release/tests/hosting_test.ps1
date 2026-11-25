@@ -148,6 +148,10 @@ Check ($r -and $r.Code -eq 'ABCDEFGH' -and $r.Relay -eq 'relay.example.net' -and
 $r = ConvertTo-RelayJoin 'forest-gang@1.2.3.4'
 Check ($r -and $null -eq $r.Password) 'relay: a line without a password has none'
 Check (-not (ConvertTo-RelayJoin 'forest-gang@1.2.3.4 two words')) 'relay: a password with a space is no line'
+$r = ConvertTo-RelayJoin 'forest-gang@relay.example.net :27600'
+Check ($r -and $r.Port -eq 27600 -and $null -eq $r.Password) 'relay: a port apart from its relay is the port, not a password'
+$r = ConvertTo-RelayJoin 'forest-gang@relay.example.net : 27600 pw:1'
+Check ($r -and $r.Port -eq 27600 -and $r.Password -eq 'pw:1') 'relay: a port apart from its relay, then the password'
 
 # Room names (issue 261): name@relay, kept as typed; a name shaped like a code gets both.
 $r = ConvertTo-RelayJoin ' Forest-Gang@relay.example.net:27600 '

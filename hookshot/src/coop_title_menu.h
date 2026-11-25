@@ -190,6 +190,11 @@ std::string RoomJoinLine(std::string_view join_line, std::string_view relay);
 // almost no guest reached a private room (private-lobby-fix, 2026-11-24). `relay_line` as it is when it has no '@'
 // (an invite code holds its password already) or there is no password.
 std::string RelayShareLine(std::string_view relay_line, std::string_view password);
+// The code a host gives its friends: its relay room line, else the relay's join code line, else the invite code (which
+// holds its password); "" none yet. `copied` (the clipboard) puts the join password after a relay line
+// (RelayShareLine); shown (the Host page's Code row) it is bare: the password is shown only when the player asks.
+std::string HostShareText(std::string_view relay_room, std::string_view relay_code, std::string_view invite,
+                          std::string_view password, bool copied);
 // A Join line that names a relay room or join code ("<room or code>@<relay>") but no join password after it: the line
 // an older host copied. Join cannot use it alone; the guest types the host's password.
 bool RelayLineWithoutPassword(std::string_view join_line);
