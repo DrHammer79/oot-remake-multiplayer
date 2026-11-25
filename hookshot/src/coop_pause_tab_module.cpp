@@ -472,6 +472,25 @@ SnailWritten SnailWrite(void* ctx, const CoopSnailCustom::Texts& t, std::string&
             if (!LiveTextIn(ctx, g_snail_layout, path, g_snail_live[7 + k], PaneText(t.values[k]), true)) break;
         }
     }
+    // (probe, once: which of his panes holds an option's slider, so an empty slot's slider can be hidden; a page
+    // of five showed the sixth slot's LT/RT bar with no label, 2026-11-24)
+    static bool probed = false;
+    if (!probed) {
+        probed = true;
+        std::string found;
+        for (const char* stem : {"N_Slider", "N_Gauge", "N_Bar", "N_Val", "N_Option", "N_Item", "N_Row", "N_Select",
+                                 "N_Mark", "N_Arrow", "N_Btn", "N_LR", "N_Value", "N_Slot", "N_Line", "Pa_Slider",
+                                 "Pa_Option", "Pa_Item", "Pa_Gauge", "Pa_Bar", "Pa_Val", "Pa_Btn", "P_Bar", "P_Gauge",
+                                 "N_Custom", "N_Param", "Pa_Param", "N_Scroll", "N_Cursor", "N_ValAll"}) {
+            for (const char* tail : {"_05", "_5", "_05_00"}) {
+                const std::string name = std::string(stem) + tail;
+                if (const std::uint64_t pane = FindOwnPane(ctx, g_snail_layout, name.c_str()); pane != 0) {
+                    found += (found.empty() ? "" : " ") + name + ((Read<std::uint32_t>(pane + 0xa8) & 1) != 0 ? "+" : "-");
+                }
+            }
+        }
+        LOG_INFO(Core, "coop: customize probe: slot 5 panes: {}", found.empty() ? std::string("none") : found);
+    }
     return failed.empty() ? SnailWritten::kAll : SnailWritten::kSome;
 }
 

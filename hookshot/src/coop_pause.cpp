@@ -14,10 +14,13 @@
 #include <variant>
 #include <vector>
 
+#include "common/fs/path_util.h"
 #include "common/logging.h"
 #include "coop/protocol/messages.hpp"
 #include "coop_auto_rejoin.h"
+#include "coop_char_ages.h"
 #include "coop_char_colours.h"
+#include "coop_char_slots.h"
 #include "coop_colors.h"
 #include "coop_dbno_game.h"
 #include "coop_difficulty.h"
@@ -36,6 +39,7 @@
 #include "coop_original.h"
 #include "coop_pause_files.h"
 #include "coop_pause_tab.h"
+#include "coop_puppet_config.h"
 #include "coop_pvp_game.h"
 #include "coop_room_list.h"
 #include "coop_runtime.h"
@@ -43,6 +47,9 @@
 #include "coop_save.h"
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <regex>
 #include "coop_title.h"
 #include "coop_title_menu.h"
 #include "coop_voice.h"
@@ -279,6 +286,45 @@ const std::string& ExefsList() {
 
 namespace {
 
+// Character Select's pickable characters (number, name) from its characters.json, the player's own mod file read at
+// run time: under mods/contents/0400486024DEC000/<mod> or mods/<mod>. Only those whose model is here
+// (coop_char_slots.h Installed; unknown: all kept). Empty: the mod is not here. Read once.
+const std::vector<std::pair<int, std::string>>& CharSelCharacters() {
+    static const std::vector<std::pair<int, std::string>> list = [] {
+        std::vector<std::pair<int, std::string>> out;
+        std::filesystem::path load = Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir);
+        if (load.filename().empty()) load = load.parent_path();
+        std::error_code ec;
+        for (const auto& root : {load / "0400486024DEC000", load.parent_path()}) {
+            for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end && out.empty(); it.increment(ec)) {
+                std::ifstream in(it->path() / "characters.json", std::ios::binary);
+                if (!in) continue;
+                const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                const auto at = text.find("\"characters\"");
+                if (at == std::string::npos) continue;
+                static const std::regex entry(R"re(\{[^{}]*?"number"\s*:\s*(\d+)[^{}]*?"name"\s*:\s*"([^"]*)"[^{}]*\})re");
+                for (std::sregex_iterator m(text.begin() + static_cast<std::ptrdiff_t>(at), text.end(), entry), mend;
+                     m != mend; ++m) {
+                    const std::string whole = (*m)[0].str();
+                    if (whole.find("\"picker\"") != std::string::npos &&
+                        !std::regex_search(whole, std::regex(R"re("picker"\s*:\s*true)re"))) {
+                        continue;
+                    }
+                    out.emplace_back(std::atoi((*m)[1].str().c_str()), (*m)[2].str());
+                }
+            }
+            ec.clear();
+            if (!out.empty()) break;
+        }
+        if (const auto files = CoopPuppetConfig::KnownCharacterFiles()) {
+            std::erase_if(out, [&](const auto& c) { return !CoopCharSlots::Installed(c.first, *files); });
+        }
+        LOG_INFO(Core, "coop: character by age: {} characters to pick from", out.size());
+        return out;
+    }();
+    return list;
+}
+
 void RefreshSession(bool now) {
     if (now || NowMs() >= g_next_session_ms) {
         g_next_session_ms = NowMs() + 250;
@@ -288,6 +334,9 @@ void RefreshSession(bool now) {
         g_menu.SetCharacter(CoopCharColours::ShownCharacter() != 0);   // (#308's Customize page: Link's colours wait)
         // (one home for Link's look: Character Select's Customize screen when his code is in the game)
         g_menu.SetSnailHome(CoopPauseTab::SnailCodeBuiltIn(ExefsList()));
+        const CoopCharAges::Stored ages = CoopCharAges::Current();
+        const auto& characters = CharSelCharacters();
+        g_menu.SetCharacterAges(!characters.empty(), ages.on, ages.child.value_or(-1), ages.adult.value_or(-1), characters);
     }
 }
 
@@ -980,6 +1029,15 @@ void Act(const Request& r) {
             g_menu.SetNote({"Only the host can change the difficulty, while hosting."});
         }
         LOG_INFO(Core, "coop: multiplayer tab: difficulty {}", choice && CoopDifficulty::Get().can_edit ? "asked" : "refused");
+        break;
+    }
+    case Request::Kind::kCharAges: {   // "on", "off", "child=N", "adult=N" (coop_char_ages.h)
+        if (r.text == "on" || r.text == "off") {
+            CoopCharAges::SetOn(r.text == "on");
+        } else if (r.text.rfind("child=", 0) == 0 || r.text.rfind("adult=", 0) == 0) {
+            CoopCharAges::SetPick(r.text[0] == 'c', std::atoi(r.text.c_str() + 6));
+        }
+        LOG_INFO(Core, "coop: character by age: {}", r.text);
         break;
     }
     case Request::Kind::kNgPlus: {   // (Navi) New Game+ (coop_ngplus.h)
